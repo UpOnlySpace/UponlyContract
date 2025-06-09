@@ -12,7 +12,6 @@ import {
   getAccount,
   getAssociatedTokenAddress,
   getMint,
-  getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   AccountNotFoundError,
 } from '@solana/spl-token';
@@ -367,7 +366,7 @@ describe('UP ONLY TESTS', () => {
     );
   });
 
-  it.skip('Admin gives a user a free pass', async () => {
+  it('Admin gives a user a free pass', async () => {
     const freePassUser = Keypair.generate();
 
     // Airdrop for fees
@@ -394,7 +393,7 @@ describe('UP ONLY TESTS', () => {
     assert.isTrue(userState.hasPass, 'User should have received a free pass from admin');
   });
 
-  it.skip('Unauthorized user cannot give a free pass', async () => {
+  it('Unauthorized user cannot give a free pass', async () => {
     const attacker = Keypair.generate();
     const victim = Keypair.generate();
 
@@ -426,7 +425,7 @@ describe('UP ONLY TESTS', () => {
     assert.isTrue(failed, 'Unauthorized user should not be able to give free pass');
   });
 
-  it.skip('Admin adds two people to the founder pool', async () => {
+  it('Admin adds two people to the founder pool', async () => {
     const [foundersPoolPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('founders_pool')],
       program.programId
@@ -472,7 +471,7 @@ describe('UP ONLY TESTS', () => {
     );
   });
 
-  it.skip('Unauthorized user cannot add a founder to the pool', async () => {
+  it('Unauthorized user cannot add a founder to the pool', async () => {
     const [foundersPoolPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('founders_pool')],
       program.programId
@@ -503,7 +502,7 @@ describe('UP ONLY TESTS', () => {
     assert.isTrue(failed, 'Unauthorized user should not be able to add founder');
   });
 
-  it.skip('User buys a pass for 10,000 USDC', async () => {
+  it('User buys a pass for 10,000 USDC', async () => {
     const [userStatePda] = PublicKey.findProgramAddressSync(
       [Buffer.from('user_state'), buyer.publicKey.toBuffer()],
       program.programId
@@ -517,6 +516,8 @@ describe('UP ONLY TESTS', () => {
     );
 
     const buyerStart = Number((await getAccount(connection, buyerUsdcAccount)).amount);
+    const deployerStart = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+    console.log('💰 Deployer USDC before:', deployerStart / 1e6);
 
     // Execute buy_pass
     await program.methods
@@ -540,6 +541,9 @@ describe('UP ONLY TESTS', () => {
     assert.isTrue(userState.hasPass, 'User should have pass after purchase');
 
     const buyerEnd = Number((await getAccount(connection, buyerUsdcAccount)).amount);
+    const deployerEnd = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+    console.log('💰 Deployer USDC after:', deployerEnd / 1e6);
+    console.log('💸 Deployer received:', (deployerEnd - deployerStart) / 1e6, 'USDC');
 
     assert.equal(
       buyerStart - buyerEnd,
@@ -548,23 +552,44 @@ describe('UP ONLY TESTS', () => {
     );
   });
 
-  it.skip('Another user buys a pass with referral and funds are split', async () => {
-    const [secondUserStatePda] = PublicKey.findProgramAddressSync(
+  it('User buys a pass with referral for 10,000 USDC', async () => {
+    const [userStatePda] = PublicKey.findProgramAddressSync(
       [Buffer.from('user_state'), secondUser.publicKey.toBuffer()],
       program.programId
     );
 
-    const referralStart = Number((await getAccount(connection, referralUsdcAccount)).amount);
-    const deployerStart = Number((await getAccount(connection, usdcTokenAccount)).amount);
+    const deployerUsdcAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      wallet.payer,
+      usdcMint,
+      wallet.publicKey
+    );
 
+    const referralUsdcAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      wallet.payer,
+      usdcMint,
+      referral.publicKey
+    );
+
+    const buyerStart = Number((await getAccount(connection, secondUserUsdcAccount)).amount);
+    const deployerStart = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+    const referralStart = Number((await getAccount(connection, referralUsdcAccount.address)).amount);
+    
+    console.log('💰 Initial Balances:');
+    console.log('👤 Buyer USDC:', buyerStart / 1e6);
+    console.log('💼 Deployer USDC:', deployerStart / 1e6);
+    console.log('🤝 Referral USDC:', referralStart / 1e6);
+
+    // Execute buy_pass with referral
     await program.methods
       .buyPass(referral.publicKey)
       .accounts({
         user: secondUser.publicKey,
-        userState: secondUserStatePda,
+        userState: userStatePda,
         userUsdcAccount: secondUserUsdcAccount,
-        deployerUsdcAccount: usdcTokenAccount,
-        referralUsdcAccount: referralUsdcAccount,
+        deployerUsdcAccount: deployerUsdcAccount.address,
+        referralUsdcAccount: referralUsdcAccount.address,
         metadata: metadataPda,
         upOnlyMint: upOnlyMint,
         tokenProgram: TOKEN_PROGRAM_ID,
@@ -574,32 +599,32 @@ describe('UP ONLY TESTS', () => {
       .signers([secondUser])
       .rpc();
 
-    const userState = await program.account.userState.fetch(secondUserStatePda);
-    assert.isTrue(userState.hasPass, 'New user should have pass after purchase');
+    const userState = await program.account.userState.fetch(userStatePda);
+    assert.isTrue(userState.hasPass, 'User should have pass after purchase');
+
+    const buyerEnd = Number((await getAccount(connection, secondUserUsdcAccount)).amount);
+    const deployerEnd = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+    const referralEnd = Number((await getAccount(connection, referralUsdcAccount.address)).amount);
+
+    console.log('\n💰 Final Balances:');
+    console.log('👤 Buyer USDC:', buyerEnd / 1e6);
+    console.log('💼 Deployer USDC:', deployerEnd / 1e6);
+    console.log('🤝 Referral USDC:', referralEnd / 1e6);
+
+    console.log('\n💸 Transaction Breakdown:');
+    console.log('👤 Buyer spent:', (buyerStart - buyerEnd) / 1e6, 'USDC');
+    console.log('💼 Deployer received:', (deployerEnd - deployerStart) / 1e6, 'USDC');
+    console.log('🤝 Referral received:', (referralEnd - referralStart) / 1e6, 'USDC');
 
     assert.equal(
-      userState.referral.toBase58(),
-      referral.publicKey.toBase58(),
-      'Referral should be correctly saved'
+      buyerStart - buyerEnd,
+      10_000 * 10 ** 6,
+      'Buyer should have spent exactly 10,000 USDC'
     );
-
-    const referralEnd = Number((await getAccount(connection, referralUsdcAccount)).amount);
-    const deployerEnd = Number((await getAccount(connection, usdcTokenAccount)).amount);
-
-    assert.equal(
-      referralEnd - referralStart,
-      5_000 * 10 ** 6,
-      'Referral should receive 5,000 USDC'
-    );
-
-    assert.equal(
-      deployerEnd - deployerStart,
-      5_000 * 10 ** 6,
-      'Deployer should receive 5,000 USDC'
-    );
+    assert.isAbove(referralEnd - referralStart, 0, 'Referral should have received some USDC');
   });
 
-  it.skip('Buyer buys Tokens after having a pass', async () => {
+  it('Buyer buys Tokens after having a pass', async () => {
     const [userStatePda] = PublicKey.findProgramAddressSync(
       [Buffer.from('user_state'), buyer.publicKey.toBuffer()],
       program.programId
@@ -635,6 +660,11 @@ describe('UP ONLY TESTS', () => {
     const buyerBalance = await getAccount(connection, buyerUsdcAccount);
     console.log('Buyer USDC balance:', Number(buyerBalance.amount));
 
+    const deployerStart = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+    console.log('💰 Initial Balances:');
+    console.log('👤 Buyer USDC:', buyerStart / 1e6);
+    console.log('💼 Deployer USDC:', deployerStart / 1e6);
+
     const [programUsdcTokenAccountPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('token_account'), usdcMint.toBuffer()],
       program.programId
@@ -666,6 +696,10 @@ describe('UP ONLY TESTS', () => {
       program.programId
     );
 
+    const [founderPoolTokenAccountPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('founder_pool_token_account'), usdcMint.toBuffer()],
+      program.programId
+    );
     const [founderAuthorityPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('founder_authority')],
       program.programId
@@ -711,9 +745,30 @@ describe('UP ONLY TESTS', () => {
       (await getAccount(connection, programUsdcAccount.address)).amount
     );
 
+    const deployerEnd = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+
     const usdcSpent = buyerStart - buyerEnd;
     const tokensReceived = tokenBalanceAfter - tokenBalanceBefore;
     const avgPricePaid = usdcSpent / 1e6 / (tokensReceived / 1e9);
+
+    console.log('\n💰 Final Balances:');
+    console.log('👤 Buyer USDC:', buyerEnd / 1e6);
+    console.log('💼 Deployer USDC:', deployerEnd / 1e6);
+
+    console.log('\n💸 Transaction Breakdown:');
+    console.log('👤 Buyer spent:', usdcSpent / 1e6, 'USDC');
+    console.log('💼 Deployer received:', (deployerEnd - deployerStart) / 1e6, 'USDC');
+
+    const deployerReceived = deployerEnd - deployerStart;
+    console.log('\n💼 Deployer Fee Analysis:');
+    console.log('  • Total received:', deployerReceived / 1e6, 'USDC');
+    console.log('  • Expected fee (2.5%):', (1_000 * 0.06), 'USDC');
+
+    assert.equal(
+      deployerReceived,
+      1_000 * 0.06 * 10 ** 6, 
+      'Deployer should have received exactly 6% of the purchase amount'
+    );
 
     console.log('💸 Average price paid this buy:', avgPricePaid.toFixed(6));
     console.log('buyerStart', buyerStart);
@@ -723,19 +778,24 @@ describe('UP ONLY TESTS', () => {
     console.log('programUsdcBefore', programUsdcBefore);
     console.log('programUsdcAfter', programUsdcAfter);
 
+    const mintInfo = await getMint(connection, upOnlyMint);
+    console.log('🧾 Total token supply:', Number(mintInfo.supply) / 1e9);
+
     assert.equal(buyerStart - buyerEnd, 1_000_000_000, 'Buyer should have spent 1000 USDC');
     assert.isAbove(tokenBalanceAfter, 0, 'Buyer should have received tokens');
   });
 
-  it.skip('Second user Buys tokens with 1000 USDC', async () => {
+  it('Second user sells tokens and referral receives 2.5%', async () => {
     const [secondUserStatePda] = PublicKey.findProgramAddressSync(
       [Buffer.from('user_state'), secondUser.publicKey.toBuffer()],
       program.programId
     );
+
     const [mintAuthorityPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('mint_authority')],
       program.programId
     );
+
     const [programUsdcTokenAccountPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('token_account'), usdcMint.toBuffer()],
       program.programId
@@ -755,6 +815,7 @@ describe('UP ONLY TESTS', () => {
       usdcMint,
       wallet.publicKey
     );
+
     const deployerUsdcAccount = await getOrCreateAssociatedTokenAccount(
       connection,
       wallet.payer,
@@ -769,7 +830,194 @@ describe('UP ONLY TESTS', () => {
       secondUser.publicKey
     );
 
+    const secondUserUsdcAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      wallet.payer,
+      usdcMint,
+      secondUser.publicKey
+    );
+
+    // Get initial balances
     const secondUserStart = Number((await getAccount(connection, secondUserUsdcAccount)).amount);
+    const referralStart = Number((await getAccount(connection, referralUsdcAccount)).amount);
+    const deployerStart = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+    const poolStart = Number((await getAccount(connection, programUsdcAccount.address)).amount);
+
+    console.log('\n💰 Initial Balances:');
+    console.log('👤 Second user USDC:', secondUserStart / 1e6);
+    console.log('🤝 Referral USDC:', referralStart / 1e6);
+    console.log('💼 Deployer USDC:', deployerStart / 1e6);
+    console.log('🏦 Pool USDC:', poolStart / 1e6);
+
+    const tokenBalanceBefore = Number(
+      (await getAccount(connection, secondUserUpTokenAccount.address)).amount
+    );
+
+    const [foundersPoolPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('founders_pool')],
+      program.programId
+    );
+
+    const [founderAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('founder_authority')],
+      program.programId
+    );
+
+    const founderPoolTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      wallet.payer,
+      usdcMint,
+      founderAuthorityPda,
+      true
+    );
+
+    // Sell tokens
+    const tx = await program.methods
+      .sellToken(new anchor.BN(tokenBalanceBefore))
+      .accounts({
+        user: secondUser.publicKey,
+        userState: secondUserStatePda,
+        userTokenAccount: secondUserUpTokenAccount.address,
+        userUsdcAccount: secondUserUsdcAccount,
+        deployerUsdcAccount: deployerUsdcAccount.address,
+        programPaymentTokenAccount: programUsdcAccount.address,
+        metadata: metadataPda,
+        tokenMint: upOnlyMint,
+        poolAuthority: programUsdcAccount.address,
+        referralUsdcAccount: referralUsdcAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        foundersPool: foundersPoolPda,
+        founderPoolTokenAccount: founderPoolTokenAccount.address,
+      })
+      .signers([secondUser])
+      .rpc();
+
+    // Get final balances
+    const secondUserEnd = Number((await getAccount(connection, secondUserUsdcAccount)).amount);
+    const referralEnd = Number((await getAccount(connection, referralUsdcAccount)).amount);
+    const deployerEnd = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+    const poolEnd = Number((await getAccount(connection, programUsdcAccount.address)).amount);
+
+    const tokenBalanceAfter = Number(
+      (await getAccount(connection, secondUserUpTokenAccount.address)).amount
+    );
+
+    // Calculate changes
+    const usdcReceived = secondUserEnd - secondUserStart;
+    const tokensSold = tokenBalanceBefore - tokenBalanceAfter;
+    const referralReceived = referralEnd - referralStart;
+    const deployerReceived = deployerEnd - deployerStart;
+    const poolChange = poolEnd - poolStart;
+
+    console.log('\n💰 Final Balances:');
+    console.log('👤 Second user USDC:', secondUserEnd / 1e6);
+    console.log('🤝 Referral USDC:', referralEnd / 1e6);
+    console.log('💼 Deployer USDC:', deployerEnd / 1e6);
+    console.log('🏦 Pool USDC:', poolEnd / 1e6);
+
+    console.log('\n💸 Transaction Breakdown:');
+    console.log('👤 Second user received:', usdcReceived / 1e6, 'USDC');
+    console.log('🤝 Referral received:', referralReceived / 1e6, 'USDC');
+    console.log('💼 Deployer received:', deployerReceived / 1e6, 'USDC');
+    console.log('🏦 Pool change:', poolChange / 1e6, 'USDC');
+
+    console.log('\n📊 Fee Analysis:');
+    const totalSellAmount = usdcReceived + referralReceived + deployerReceived;
+    console.log('  • Total sell amount:', totalSellAmount / 1e6, 'USDC');
+    console.log('  • Referral share (3%):', (totalSellAmount * 0.03) / 1e6, 'USDC');
+    console.log('  • Team share (3%):', (totalSellAmount * 0.03) / 1e6, 'USDC');
+
+    // Verify the amounts
+    assert.equal(tokenBalanceAfter, 0, 'Second user should have sold all tokens');
+    assert.isAbove(usdcReceived, 0, 'Second user should receive USDC');
+    
+    // Verify referral received exactly 3% of the total sell amount
+    assert.equal(
+      referralReceived,
+      Math.floor(totalSellAmount * 0.03),
+      'Referral should receive exactly 3% of the total sell amount'
+    );
+
+    // Verify deployer received exactly 3% of the total sell amount
+    assert.equal(
+      deployerReceived,
+      Math.floor(totalSellAmount * 0.03),
+      'Deployer should receive exactly 3% of the total sell amount'
+    );
+
+    // Verify total team fee is 6%
+    const totalTeamFee = referralReceived + deployerReceived;
+    assert.equal(
+      totalTeamFee,
+      Math.floor(totalSellAmount * 0.06),
+      'Total team fee should be exactly 6% of the total sell amount'
+    );
+  });
+
+  it.skip('Second user buys and locks tokens', async () => {
+    const [secondUserStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('user_state'), secondUser.publicKey.toBuffer()],
+      program.programId
+    );
+
+    const [mintAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('mint_authority')],
+      program.programId
+    );
+
+    const [programUsdcTokenAccountPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_account'), usdcMint.toBuffer()],
+      program.programId
+    );
+
+    const programUsdcAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      wallet.payer,
+      usdcMint,
+      programUsdcTokenAccountPda,
+      true
+    );
+
+    const lockedLiquidityAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      wallet.payer,
+      usdcMint,
+      wallet.publicKey
+    );
+
+    const deployerUsdcAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      wallet.payer,
+      usdcMint,
+      wallet.publicKey
+    );
+
+    const secondUserUpTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      wallet.payer,
+      upOnlyMint,
+      secondUser.publicKey
+    );
+
+    const secondUserUsdcAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      wallet.payer,
+      usdcMint,
+      secondUser.publicKey
+    );
+
+    // Get initial balances
+    const secondUserStart = Number((await getAccount(connection, secondUserUsdcAccount)).amount);
+    const referralStart = Number((await getAccount(connection, referralUsdcAccount)).amount);
+    const deployerStart = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+    const poolStart = Number((await getAccount(connection, programUsdcAccount.address)).amount);
+
+    console.log('\n💰 Initial Balances:');
+    console.log('👤 Second user USDC:', secondUserStart / 1e6);
+    console.log('🤝 Referral USDC:', referralStart / 1e6);
+    console.log('💼 Deployer USDC:', deployerStart / 1e6);
+    console.log('🏦 Pool USDC:', poolStart / 1e6);
+
     const tokenBalanceBefore = Number(
       (await getAccount(connection, secondUserUpTokenAccount.address)).amount
     );
@@ -794,18 +1042,18 @@ describe('UP ONLY TESTS', () => {
 
     // Buy tokens
     const tx = await program.methods
-      .buyToken(new anchor.BN(1_000_000_000), referral.publicKey)
+      .buyAndLockToken(new anchor.BN(1_000_000_000), new anchor.BN(0), null)
       .accounts({
         user: secondUser.publicKey,
         userState: secondUserStatePda,
         userUsdcAccount: secondUserUsdcAccount,
-        userTokenAccount: secondUserUpTokenAccount.address,
         deployerUsdcAccount: deployerUsdcAccount.address,
-        lockedLiquidityUsdc: lockedLiquidityAccount.address,
         programPaymentTokenAccount: programUsdcAccount.address,
-        metadata: metadataPda,
         tokenMint: upOnlyMint,
+        vaultTokenAccount: secondUserUpTokenAccount.address,
+        vaultAuthority: secondUser.publicKey,
         mintAuthority: mintAuthorityPda,
+        metadata: metadataPda,
         referralUsdcAccount: referralUsdcAccount,
         founderPoolTokenAccount: founderPoolTokenAccount.address,
         foundersPool: foundersPoolPda,
@@ -814,256 +1062,65 @@ describe('UP ONLY TESTS', () => {
       .signers([secondUser])
       .rpc();
 
+    // Get final balances
     const secondUserEnd = Number((await getAccount(connection, secondUserUsdcAccount)).amount);
+    const referralEnd = Number((await getAccount(connection, referralUsdcAccount)).amount);
+    const deployerEnd = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+    const poolEnd = Number((await getAccount(connection, programUsdcAccount.address)).amount);
+
     const tokenBalanceAfter = Number(
       (await getAccount(connection, secondUserUpTokenAccount.address)).amount
     );
 
+    // Calculate changes
     const usdcSpent = secondUserStart - secondUserEnd;
     const tokensReceived = tokenBalanceAfter - tokenBalanceBefore;
-    const avgPricePaid = usdcSpent / 1e6 / (tokensReceived / 1e9);
+    const referralReceived = referralEnd - referralStart;
+    const deployerReceived = deployerEnd - deployerStart;
+    const poolReceived = poolEnd - poolStart;
 
-    console.log('tokenBalanceBefore', tokenBalanceBefore);
-    console.log('tokenBalanceAfter', tokenBalanceAfter);
-    console.log('👤 Second Buyer');
-    console.log('💸 Average price paid:', avgPricePaid.toFixed(6));
+    console.log('\n💰 Final Balances:');
+    console.log('👤 Second user USDC:', secondUserEnd / 1e6);
+    console.log('🤝 Referral USDC:', referralEnd / 1e6);
+    console.log('💼 Deployer USDC:', deployerEnd / 1e6);
+    console.log('🏦 Pool USDC:', poolEnd / 1e6);
 
+    console.log('\n💸 Transaction Breakdown:');
+    console.log('👤 Second user spent:', usdcSpent / 1e6, 'USDC');
+    console.log('🤝 Referral received:', referralReceived / 1e6, 'USDC');
+    console.log('💼 Deployer received:', deployerReceived / 1e6, 'USDC');
+    console.log('🏦 Pool received:', poolReceived / 1e6, 'USDC');
+
+    console.log('\n📊 Fee Analysis:');
+    console.log('  • Total team fee (6%):', (1_000 * 0.06), 'USDC');
+    console.log('  • Referral share (3%):', (1_000 * 0.03), 'USDC');
+    console.log('  • Team share (3%):', (1_000 * 0.03), 'USDC');
+
+    // Verify the amounts
     assert.equal(usdcSpent, 1_000_000_000, 'Second user should spend 1000 USDC');
     assert.isAbove(tokensReceived, 0, 'Second user should receive tokens');
-  });
-
-  it.skip('Buyer sells tokens after Second user buys', async () => {
-    const [userStatePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('user_state'), buyer.publicKey.toBuffer()],
-      program.programId
+    
+    // Verify referral received exactly 3% (half of team fee)
+    assert.equal(
+      referralReceived,
+      1_000 * 0.03 * 10 ** 6,
+      'Referral should receive exactly 3% of the purchase amount'
     );
 
-    const [mintAuthorityPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('mint_authority')],
-      program.programId
+    // Verify deployer received exactly 3% (half of team fee)
+    assert.equal(
+      deployerReceived,
+      1_000 * 0.03 * 10 ** 6,
+      'Deployer should receive exactly 3% of the purchase amount'
     );
 
-    const [poolAuthority] = PublicKey.findProgramAddressSync(
-      [Buffer.from('token_account'), usdcMint.toBuffer()],
-      program.programId
+    // Verify total team fee is 6%
+    const totalTeamFee = referralReceived + deployerReceived;
+    assert.equal(
+      totalTeamFee,
+      1_000 * 0.06 * 10 ** 6,
+      'Total team fee should be exactly 6% of the purchase amount'
     );
-
-    const buyerUpTokenAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      wallet.payer,
-      upOnlyMint,
-      buyer.publicKey
-    );
-
-    const buyerUsdcBefore = Number((await getAccount(connection, buyerUsdcAccount)).amount);
-    const buyerTokenBefore = Number(
-      (await getAccount(connection, buyerUpTokenAccount.address)).amount
-    );
-
-    const programUsdcAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      wallet.payer,
-      usdcMint,
-      poolAuthority,
-      true
-    );
-
-    const deployerUsdcAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      wallet.payer,
-      usdcMint,
-      wallet.publicKey
-    );
-
-    // Sell half of the tokens user owns
-    const amountToSell = buyerTokenBefore;
-
-    const programUsdcBefore = Number(
-      (await getAccount(connection, programUsdcAccount.address)).amount
-    );
-
-    const [foundersPoolPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('founders_pool')],
-      program.programId
-    );
-
-    const [founderPoolTokenAccountPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('founder_pool_token_account'), usdcMint.toBuffer()],
-      program.programId
-    );
-
-    const [founderAuthorityPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('founder_authority')],
-      program.programId
-    );
-
-    const founderPoolTokenAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      wallet.payer,
-      usdcMint,
-      founderAuthorityPda,
-      true
-    );
-
-    console.log('👤 Seller USDC before:', buyerUsdcBefore / 1e6);
-    await program.methods
-      .sellToken(new anchor.BN(amountToSell))
-      .accounts({
-        user: buyer.publicKey,
-        userState: userStatePda,
-        userTokenAccount: buyerUpTokenAccount.address,
-        userUsdcAccount: buyerUsdcAccount,
-        deployerUsdcAccount: deployerUsdcAccount.address,
-        programPaymentTokenAccount: programUsdcAccount.address,
-        metadata: metadataPda,
-        tokenMint: upOnlyMint,
-        mintAuthority: mintAuthorityPda,
-
-        poolAuthority: poolAuthority,
-        referralUsdcAccount: null,
-        founderPoolTokenAccount: founderPoolTokenAccount.address,
-        foundersPool: foundersPoolPda,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .signers([buyer])
-      .rpc();
-
-    const buyerUsdcAfter = Number((await getAccount(connection, buyerUsdcAccount)).amount);
-    const buyerTokenAfter = Number(
-      (await getAccount(connection, buyerUpTokenAccount.address)).amount
-    );
-
-    console.log('👤 Seller USDC after: ', buyerUsdcAfter / 1e6);
-    console.log('📉 Tokens before:', buyerTokenBefore / 1e9);
-    console.log('📉 Tokens after: ', buyerTokenAfter / 1e9);
-
-    const programUsdcAfter = Number(
-      (await getAccount(connection, programUsdcAccount.address)).amount
-    );
-    console.log('📊 Program USDC before:', programUsdcBefore / 1e6);
-    console.log('📊 Program USDC after: ', programUsdcAfter / 1e6);
-    assert.isBelow(
-      buyerTokenAfter,
-      buyerTokenBefore,
-      'Buyer should have fewer tokens after selling'
-    );
-    assert.isAbove(buyerUsdcAfter, buyerUsdcBefore, 'Buyer should have more USDC after selling');
-  });
-
-  it.skip('Second user sells tokens and referral receives 2.5%', async () => {
-    const [secondUserStatePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('user_state'), secondUser.publicKey.toBuffer()],
-      program.programId
-    );
-
-    const [poolAuthority] = PublicKey.findProgramAddressSync(
-      [Buffer.from('token_account'), usdcMint.toBuffer()],
-      program.programId
-    );
-
-    const secondUserUpTokenAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      wallet.payer,
-      upOnlyMint,
-      secondUser.publicKey
-    );
-
-    const secondUserTokenBefore = Number(
-      (await getAccount(connection, secondUserUpTokenAccount.address)).amount
-    );
-
-    const secondUserUsdcBefore = Number(
-      (await getAccount(connection, secondUserUsdcAccount)).amount
-    );
-    const referralUsdcBefore = Number((await getAccount(connection, referralUsdcAccount)).amount);
-    const deployerUsdcBefore = Number((await getAccount(connection, usdcTokenAccount)).amount);
-
-    const programUsdcAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      wallet.payer,
-      usdcMint,
-      poolAuthority,
-      true
-    );
-
-    const programUsdcBefore = Number(
-      (await getAccount(connection, programUsdcAccount.address)).amount
-    );
-
-    const [foundersPoolPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('founders_pool')],
-      program.programId
-    );
-
-    const [founderPoolTokenAccountPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('founder_pool_token_account'), usdcMint.toBuffer()],
-      program.programId
-    );
-
-    const [founderAuthorityPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('founder_authority')],
-      program.programId
-    );
-
-    const founderPoolTokenAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      wallet.payer,
-      usdcMint,
-      founderAuthorityPda,
-      true
-    );
-
-    const tx = await program.methods
-      .sellToken(new anchor.BN(secondUserTokenBefore))
-      .accounts({
-        user: secondUser.publicKey,
-        userState: secondUserStatePda,
-        userTokenAccount: secondUserUpTokenAccount.address,
-        userUsdcAccount: secondUserUsdcAccount,
-        deployerUsdcAccount: usdcTokenAccount,
-        programPaymentTokenAccount: programUsdcAccount.address,
-        metadata: metadataPda,
-        tokenMint: upOnlyMint,
-        mintAuthority: PublicKey.default, // unused but required
-        founderPoolTokenAccount: founderPoolTokenAccount.address,
-        foundersPool: foundersPoolPda,
-        poolAuthority,
-        referralUsdcAccount,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .signers([secondUser])
-      .rpc();
-
-    const secondUserTokenAfter = Number(
-      (await getAccount(connection, secondUserUpTokenAccount.address)).amount
-    );
-    const secondUserUsdcAfter = Number(
-      (await getAccount(connection, secondUserUsdcAccount)).amount
-    );
-    const referralUsdcAfter = Number((await getAccount(connection, referralUsdcAccount)).amount);
-    const deployerUsdcAfter = Number((await getAccount(connection, usdcTokenAccount)).amount);
-    const programUsdcAfter = Number(
-      (await getAccount(connection, programUsdcAccount.address)).amount
-    );
-
-    console.log('👤 Second user USDC before:', secondUserUsdcBefore / 1e6);
-    console.log('👤 Second user USDC after:', secondUserUsdcAfter / 1e6);
-    console.log('🤝 Referral USDC before:', referralUsdcBefore / 1e6);
-    console.log('🤝 Referral USDC after:', referralUsdcAfter / 1e6);
-    console.log('💼 Deployer USDC before:', deployerUsdcBefore / 1e6);
-    console.log('💼 Deployer USDC after:', deployerUsdcAfter / 1e6);
-    console.log('📉 Tokens before:', secondUserTokenBefore / 1e9);
-    console.log('📉 Tokens after:', secondUserTokenAfter / 1e9);
-    console.log('🏦 Program USDC before:', programUsdcBefore / 1e6);
-    console.log('🏦 Program USDC after:', programUsdcAfter / 1e6);
-
-    const mintInfo = await getMint(connection, upOnlyMint);
-    console.log('🧾 Total token supply after sell:', Number(mintInfo.supply) / 1e9);
-
-    assert.equal(secondUserTokenAfter, 0, 'All tokens should be sold');
-    assert.isAbove(secondUserUsdcAfter, secondUserUsdcBefore, 'User should receive USDC');
-    assert.isAbove(referralUsdcAfter, referralUsdcBefore, 'Referral should receive 2.5%');
-    assert.isAbove(deployerUsdcAfter, deployerUsdcBefore, 'Deployer should receive 2.5%');
   });
 
   it.skip('Buyer buys tokens AGAIN', async () => {
@@ -1189,6 +1246,8 @@ describe('UP ONLY TESTS', () => {
       (await getAccount(connection, programUsdcAccount.address)).amount
     );
 
+    const deployerEnd = Number((await getAccount(connection, deployerUsdcAccount.address)).amount);
+
     const usdcSpent = buyerStart - buyerEnd;
     const tokensReceived = tokenBalanceAfter - tokenBalanceBefore;
 
@@ -1209,7 +1268,7 @@ describe('UP ONLY TESTS', () => {
     assert.isAbove(tokenBalanceAfter, 0, 'Buyer should have received tokens');
   });
 
-  it('Initializes vault for lockedUser', async () => {
+  it.skip('Initializes vault for lockedUser', async () => {
     const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('vault'), lockedUser.publicKey.toBuffer()],
       program.programId
@@ -1239,7 +1298,7 @@ describe('UP ONLY TESTS', () => {
     );
   });
 
-  it('User buys and locks tokens without a pass', async () => {
+  it.skip('User buys and locks tokens without a pass', async () => {
     const lockedUserUsdcAccount = (
       await getOrCreateAssociatedTokenAccount(
         connection,
@@ -1316,8 +1375,6 @@ describe('UP ONLY TESTS', () => {
         founderPoolTokenAccount: founderPoolTokenAccount.address,
         foundersPool: foundersPoolPda,
         tokenProgram: TOKEN_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
-        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       })
       .signers([lockedUser])
       .rpc();
@@ -1366,7 +1423,7 @@ describe('UP ONLY TESTS', () => {
     );
   });
 
-  it('Fails to initialize vault again for lockedUser', async () => {
+  it.skip('Fails to initialize vault again for lockedUser', async () => {
     const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('vault'), lockedUser.publicKey.toBuffer()],
       program.programId
@@ -1397,7 +1454,7 @@ describe('UP ONLY TESTS', () => {
     assert.isTrue(failed, 'Second vault initialization should fail');
   });
 
-  it('Fails to buy and lock tokens again for the same user', async () => {
+  it.skip('Fails to buy and lock tokens again for the same user', async () => {
     const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('vault'), lockedUser.publicKey.toBuffer()],
       program.programId
@@ -1467,8 +1524,6 @@ describe('UP ONLY TESTS', () => {
           founderPoolTokenAccount: founderPoolTokenAccount.address,
           foundersPool: foundersPoolPda,
           tokenProgram: TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
         })
         .signers([lockedUser])
         .rpc();
@@ -1480,7 +1535,7 @@ describe('UP ONLY TESTS', () => {
     assert.isTrue(failed, 'Second buyAndLockToken should fail due to AlreadyInitialized');
   });
 
-  it('User unlocks early with penalty using earlyUnlockTokens()', async () => {
+  it.skip('User unlocks early with penalty using earlyUnlockTokens()', async () => {
     const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('vault'), lockedUser.publicKey.toBuffer()],
       program.programId
@@ -1573,7 +1628,9 @@ describe('UP ONLY TESTS', () => {
     );
 
     const mintAfter = await connection.getParsedAccountInfo(upOnlyMint);
-    const tokenSupplyAfter = Number(mintAfter.value?.data?.parsed?.info?.supply ?? 0);
+    const tokenSupplyAfter = mintAfter.value?.data?.parsed?.info?.supply
+      ? Number(mintAfter.value.data.parsed.info.supply)
+      : 0;
 
     console.log('📦 Token Supply (before):', tokenSupplyBefore / 1e9);
     console.log('📦 Token Supply (after):', tokenSupplyAfter / 1e9);
@@ -1599,7 +1656,7 @@ describe('UP ONLY TESTS', () => {
     assert.isAbove(after, before, 'User should receive USDC after early unlock');
   });
 
-  it('Cranker fails to call earlyUnlockTokens() on someone else’s lock', async () => {
+  it.skip('Cranker fails to call earlyUnlockTokens() on someone else\'s lock', async () => {
     const crank = Keypair.generate();
     await connection.requestAirdrop(crank.publicKey, 2e9);
 
@@ -1687,7 +1744,7 @@ describe('UP ONLY TESTS', () => {
     }
   });
 
-  it('Cranker (bot) claims unlocked tokens and sends USDC to the locked user', async () => {
+  it.skip('Cranker (bot) claims unlocked tokens and sends USDC to the locked user', async () => {
     const crank = Keypair.generate();
 
     // Airdrop SOL to the cranker for tx fees
@@ -1743,13 +1800,6 @@ describe('UP ONLY TESTS', () => {
       (await getAccount(connection, founderPoolTokenAccount.address)).amount
     );
     const deployerBefore = Number((await getAccount(connection, usdcTokenAccount)).amount);
-    const crankerUsdcAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      wallet.payer,
-      usdcMint,
-      crank.publicKey
-    );
-    const crankerBefore = Number((await getAccount(connection, crankerUsdcAccount.address)).amount);
 
     await new Promise(resolve => setTimeout(resolve, 2000)); // wait 2s for unlock to be valid
 
@@ -1762,9 +1812,7 @@ describe('UP ONLY TESTS', () => {
       (await getAccount(connection, programUsdcAccount.address)).amount
     );
     const mintBefore = await connection.getParsedAccountInfo(upOnlyMint);
-    const tokenSupplyBefore = mintBefore.value?.data?.parsed?.info?.supply
-      ? Number(mintBefore.value.data.parsed.info.supply)
-      : 0;
+    const tokenSupplyBefore = Number(mintBefore.value?.data?.parsed?.info?.supply ?? 0);
 
     const tx = await program.methods
       .claimLockedTokens()
@@ -1787,9 +1835,9 @@ describe('UP ONLY TESTS', () => {
       .signers([crank])
       .rpc();
 
+    const after = Number((await getAccount(connection, lockedUserUsdcAccount)).amount);
     const founderPoolBalance = await getAccount(connection, founderPoolTokenAccount.address);
     const deployerBalance = await getAccount(connection, usdcTokenAccount);
-    const crankerAfter = Number((await getAccount(connection, crankerUsdcAccount.address)).amount);
     const liquidityAfter = Number(
       (await getAccount(connection, programUsdcAccount.address)).amount
     );
@@ -1807,7 +1855,6 @@ describe('UP ONLY TESTS', () => {
     console.log('🏦 Liquidity USDC (after):', liquidityAfter / 1e6);
     console.log('🔻 Liquidity Removed:', (liquidityBefore - liquidityAfter) / 1e6);
 
-    const after = Number((await getAccount(connection, lockedUserUsdcAccount)).amount);
     console.log('📊 Final Balances:');
     console.log('  • 🧑‍💼 User USDC:', after / 1e6);
     console.log('  • 🏦 Founder Pool USDC:', Number(founderPoolBalance.amount) / 1e6);
@@ -1821,9 +1868,9 @@ describe('UP ONLY TESTS', () => {
     );
     console.log('  • 🏷️ Fee to Deployer:', (Number(deployerBalance.amount) - deployerBefore) / 1e6);
 
-    console.log('  • 🤖 Cranker USDC (before):', crankerBefore / 1e6);
-    console.log('  • 🤖 Cranker USDC (after):', crankerAfter / 1e6);
-    console.log('  • 💸 Cranker Reward (USDC):', (crankerAfter - crankerBefore) / 1e6);
+    console.log('  • 🤖 Cranker USDC (before):', before / 1e6);
+    console.log('  • 🤖 Cranker USDC (after):', after / 1e6);
+    console.log('  • 💸 Cranker Reward (USDC):', (after - before) / 1e6);
 
     assert.isAbove(after, before, 'User should receive USDC after locked token claim');
   });

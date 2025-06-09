@@ -3,16 +3,16 @@ use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
 
-declare_id!("7Bjr7jfNtrKByCEWLaPpkeJoh2FymDRSXyeKEbpd3Hqh");
+declare_id!("9VvMW9dKySG3j6aDCHARPJwU92nRfiWbxKj4TJce6wJZ");
 
 #[program]
 pub mod up_only {
     use super::*;
 
     const TEAM_FEE_BPS: u64 = 300; // 3%
-    const FOUNDER_FEE_BPS: u64 = 50; // 0.5%
-    const BUY_FEE_BPS: u64 = 1000; // 10%
-    const SELL_FEE_BPS: u64 = 1500; // 15%
+    const FOUNDER_FEE_BPS: u64 = 25; // 0.25%
+    const BUY_FEE_BPS: u64 = 925; // 9.25%
+    const SELL_FEE_BPS: u64 = 925; // 9.25%
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         if ctx.accounts.metadata.initialized {
@@ -318,8 +318,7 @@ pub mod up_only {
         let price_per_token = liquidity_balance / token_supply;
         let total_value = tokens_to_sell * price_per_token;
         let total_value_scaled = total_value * 1e6;
-        let locked_share =
-            ((SELL_FEE_BPS as f64 / 10_000.0) * total_value_scaled).round() as u64;
+        let locked_share = ((SELL_FEE_BPS as f64 / 10_000.0) * total_value_scaled).round() as u64;
         let team_cut_u64 = ((TEAM_FEE_BPS as f64 / 10_000.0) * total_value_scaled).round() as u64;
         let founders_cut_u64 =
             ((FOUNDER_FEE_BPS as f64 / 10_000.0) * total_value_scaled).round() as u64;
@@ -400,6 +399,7 @@ pub mod up_only {
                 team_cut_u64,
             )?;
         }
+        
         token::transfer(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
@@ -649,18 +649,60 @@ pub mod up_only {
             founder_fee,
         )?;
 
-        token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.program_payment_token_account.to_account_info(),
-                    to: ctx.accounts.deployer_usdc_account.to_account_info(),
-                    authority: ctx.accounts.pool_authority.to_account_info(),
-                },
-                pool_seeds,
-            ),
-            team_fee,
-        )?;
+        if let Some(ref_pubkey) = lock_state.referral {
+            let referral_token_account = ctx
+                .accounts
+                .referral_usdc_account
+                .as_ref()
+                .ok_or(CustomError::MissingReferralAccount)?;
+
+            require!(
+                referral_token_account.owner == ref_pubkey,
+                CustomError::InvalidReferral
+            );
+
+            let referral_share = team_fee / 2;
+            let deployer_share = team_fee - referral_share;
+
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: referral_token_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                referral_share,
+            )?;
+
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: ctx.accounts.deployer_usdc_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                deployer_share,
+            )?;
+        } else {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: ctx.accounts.deployer_usdc_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                team_fee,
+            )?;
+        }
 
         token::transfer(
             CpiContext::new_with_signer(
@@ -749,18 +791,60 @@ pub mod up_only {
             founder_fee,
         )?;
 
-        token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.program_payment_token_account.to_account_info(),
-                    to: ctx.accounts.deployer_usdc_account.to_account_info(),
-                    authority: ctx.accounts.pool_authority.to_account_info(),
-                },
-                pool_seeds,
-            ),
-            team_fee,
-        )?;
+        if let Some(ref_pubkey) = lock_state.referral {
+            let referral_token_account = ctx
+                .accounts
+                .referral_usdc_account
+                .as_ref()
+                .ok_or(CustomError::MissingReferralAccount)?;
+
+            require!(
+                referral_token_account.owner == ref_pubkey,
+                CustomError::InvalidReferral
+            );
+
+            let referral_share = team_fee / 2;
+            let deployer_share = team_fee - referral_share;
+
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: referral_token_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                referral_share,
+            )?;
+
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: ctx.accounts.deployer_usdc_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                deployer_share,
+            )?;
+        } else {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: ctx.accounts.deployer_usdc_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                team_fee,
+            )?;
+        }
 
         token::transfer(
             CpiContext::new_with_signer(
@@ -842,46 +926,46 @@ pub mod up_only {
 pub fn get_lock_fee_config(lock_days: u64) -> LockFeeConfig {
     match lock_days {
         0..=3 => LockFeeConfig {
-            buy_bps: 250,
-            sell_bps: 250,
-            team_bps: 150,
-            founder_bps: 50,
+            buy_bps: 150,
+            sell_bps: 150,
+            team_bps: 75,
+            founder_bps: 25,
         },
         4..=7 => LockFeeConfig {
-            buy_bps: 300,
-            sell_bps: 400,
-            team_bps: 200,
-            founder_bps: 50,
+            buy_bps: 225,
+            sell_bps: 225,
+            team_bps: 100,
+            founder_bps: 25,
         },
         8..=14 => LockFeeConfig {
-            buy_bps: 400,
-            sell_bps: 500,
-            team_bps: 250,
-            founder_bps: 50,
+            buy_bps: 300,
+            sell_bps: 300,
+            team_bps: 125,
+            founder_bps: 25,
         },
         15..=31 => LockFeeConfig {
-            buy_bps: 500,
-            sell_bps: 600,
-            team_bps: 300,
-            founder_bps: 50,
+            buy_bps: 375,
+            sell_bps: 375,
+            team_bps: 150,
+            founder_bps: 25,
         },
         32..=60 => LockFeeConfig {
-            buy_bps: 600,
-            sell_bps: 700,
-            team_bps: 350,
-            founder_bps: 50,
+            buy_bps: 450,
+            sell_bps: 450,
+            team_bps: 175,
+            founder_bps: 25,
         },
         61..=90 => LockFeeConfig {
-            buy_bps: 900,
-            sell_bps: 1000,
-            team_bps: 500,
-            founder_bps: 50,
+            buy_bps: 550,
+            sell_bps: 550,
+            team_bps: 200,
+            founder_bps: 25,
         },
         _ => LockFeeConfig {
-            buy_bps: 900,
-            sell_bps: 1000,
-            team_bps: 500,
-            founder_bps: 50,
+            buy_bps: 725,
+            sell_bps: 725,
+            team_bps: 250,
+            founder_bps: 25,
         },
     }
 }
@@ -1188,6 +1272,9 @@ pub struct BuyAndLockToken<'info> {
 pub struct ClaimLockedTokens<'info> {
     pub cranker: Signer<'info>,
 
+    #[account(mut)]
+    pub referral_usdc_account: Option<Account<'info, TokenAccount>>,
+
     #[account(
         seeds = [b"token_account", metadata.payment_token.as_ref()],
         bump
@@ -1252,6 +1339,9 @@ pub struct ClaimLockedTokens<'info> {
 pub struct EarlyUnlockTokens<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
+
+    #[account(mut)]
+    pub referral_usdc_account: Option<Account<'info, TokenAccount>>,
 
     #[account(
         mut,
