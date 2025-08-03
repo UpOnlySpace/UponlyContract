@@ -63,6 +63,7 @@ pub mod up_only {
             signer_seeds,
         );
         token::set_authority(cpi_context, AuthorityType::MintTokens, Some(mint_authority))?;
+        token::set_authority(cpi_context, AuthorityType::FreezeAccount, Some(mint_authority))?;
 
         Ok(())
     }
