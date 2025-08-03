@@ -1392,7 +1392,7 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 8 + (4 + 60 * 32) + (4 + 60 * 8) + 1,
+        space = 8 + 4 + 6 + 4 + 2 + 160 + 1, 
         seeds = [b"metadata", up_only_mint.key().as_ref()],
         bump
     )]
@@ -1435,7 +1435,7 @@ pub struct InitializeFoundersPool<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 32 + 8 + (32 * 60) + (8 * 60),
+        space = 8 + 8 + 1924 + 484 + 1, 
         seeds = [b"founders_pool"],
         bump
     )]
