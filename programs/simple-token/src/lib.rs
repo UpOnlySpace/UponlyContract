@@ -214,6 +214,8 @@ pub mod up_only {
 
         let mintable_tokens = ((usdc_for_tokens as u128) * 1_000_000_000 / avg_price) as u64;
 
+        require!(mintable_tokens > 0, CustomError::InsufficientAmount);
+
         if user_state.referral_set {
             let referral_token_account = ctx
                 .accounts
@@ -504,6 +506,8 @@ pub mod up_only {
             liquidity_growth * 1_000_000_000 / ((token_supply as u128) + estimated_tokens);
         let avg_price = (price_start + price_end) / 2;
         let mintable_tokens = ((usdc_for_tokens as u128) * 1_000_000_000 / avg_price) as u64;
+
+        require!(mintable_tokens > 0, CustomError::InsufficientAmount);
 
         if let Some(ref_pubkey) = referral {
             let referral_token_account = ctx
@@ -848,16 +852,18 @@ pub mod up_only {
         let user_amount_after_fees =
             total_usdc - borrow_amount - team_share - founder_fee - locked_share;
         let liquidity_balance =
-            token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?
-                as f64;
+            token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?;
 
-        let token_supply = ctx.accounts.token_mint.supply as f64;
-        let price_start = liquidity_balance / token_supply.max(1.0);
-        let estimated_tokens = (usdc_for_tokens as f64) / price_start;
-        let liquidity_growth = liquidity_balance + usdc_for_tokens as f64 + locked_share as f64;
-        let price_end = (liquidity_growth) / (token_supply + estimated_tokens);
-        let avg_price = (price_start + price_end) / 2.0;
-        let mintable_tokens = ((usdc_for_tokens as f64) / avg_price).floor() as u64;
+        let token_supply = ctx.accounts.token_mint.supply;
+        
+        let price_start = (liquidity_balance as u128) * 1_000_000_000 / (token_supply.max(1) as u128);
+        let estimated_tokens = (usdc_for_tokens as u128) * 1_000_000_000 / price_start;
+        let liquidity_growth = (liquidity_balance as u128) + (usdc_for_tokens as u128) + (locked_share as u128);
+        let price_end = liquidity_growth * 1_000_000_000 / ((token_supply as u128) + estimated_tokens);
+        let avg_price = (price_start + price_end) / 2;
+        let mintable_tokens = ((usdc_for_tokens as u128) * 1_000_000_000 / avg_price) as u64;
+        
+        require!(mintable_tokens > 0, CustomError::InsufficientAmount);
         if let Some(ref_pubkey) = referral {
             let referral_token_account = ctx
                 .accounts
@@ -2308,4 +2314,7 @@ pub enum CustomError {
 
     #[msg("Duplicate founder")]
     DuplicateFounder,
+
+    #[msg("Insufficient amount to mint tokens")]
+    InsufficientAmount,
 }
