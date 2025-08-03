@@ -175,7 +175,7 @@ describe('UP ONLY TESTS', () => {
       connection,
       wallet.payer,
       upOnlyMintAuthority.publicKey,
-      upOnlyFreezeAuthority.publicKey,
+      upOnlyMintAuthority.publicKey,
       9 // UpOnly uses 9 decimals
     );
 

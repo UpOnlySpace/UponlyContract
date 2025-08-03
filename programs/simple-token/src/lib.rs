@@ -54,16 +54,24 @@ pub mod up_only {
         let mint_authority_bump = ctx.bumps.mint_authority;
         let signer_seeds: &[&[&[u8]]] = &[&[b"mint_authority", &[mint_authority_bump]]];
 
-        let cpi_context = CpiContext::new_with_signer(
+        let cpi_context = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             token::SetAuthority {
                 account_or_mint: ctx.accounts.up_only_mint.to_account_info(),
                 current_authority: ctx.accounts.current_mint_authority.to_account_info(),
             },
-            signer_seeds,
         );
+
         token::set_authority(cpi_context, AuthorityType::MintTokens, Some(mint_authority))?;
-        token::set_authority(cpi_context, AuthorityType::FreezeAccount, Some(mint_authority))?;
+
+        let cpi_context = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            token::SetAuthority {
+                account_or_mint: ctx.accounts.up_only_mint.to_account_info(),
+                current_authority: ctx.accounts.current_mint_authority.to_account_info(),
+            },
+        );
+        token::set_authority(cpi_context, AuthorityType::FreezeAccount, None)?;
 
         Ok(())
     }
@@ -192,17 +200,19 @@ pub mod up_only {
         let usdc_for_tokens = total_usdc - team_share - locked_share - founder_fee;
 
         let liquidity_balance =
-            token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?
-                as f64;
-        let token_supply = ctx.accounts.token_mint.supply as f64;
-        let price_start = liquidity_balance / token_supply;
-        let estimated_tokens = (usdc_for_tokens as f64) / price_start;
+            token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?;
+        let token_supply = ctx.accounts.token_mint.supply;
 
-        let liquidity_growth = liquidity_balance + usdc_for_tokens as f64 + locked_share as f64;
-        let price_end = (liquidity_growth) / (token_supply + estimated_tokens);
-        let avg_price = (price_start + price_end) / 2.0;
+        let price_start = (liquidity_balance as u128) * 1_000_000_000 / (token_supply as u128);
+        let estimated_tokens = (usdc_for_tokens as u128) * 1_000_000_000 / price_start;
 
-        let mintable_tokens = ((usdc_for_tokens as f64) / avg_price).floor() as u64;
+        let liquidity_growth =
+            (liquidity_balance as u128) + (usdc_for_tokens as u128) + (locked_share as u128);
+        let price_end =
+            liquidity_growth * 1_000_000_000 / ((token_supply as u128) + estimated_tokens);
+        let avg_price = (price_start + price_end) / 2;
+
+        let mintable_tokens = ((usdc_for_tokens as u128) * 1_000_000_000 / avg_price) as u64;
 
         if user_state.referral_set {
             let referral_token_account = ctx
@@ -304,29 +314,27 @@ pub mod up_only {
         let user_state = &ctx.accounts.user_state;
 
         let liquidity_balance_raw =
-            token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?
-                as f64;
-        let token_supply_raw = ctx.accounts.token_mint.supply.max(1) as f64;
-        let tokens_to_sell_raw = amount as f64;
+            token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?;
+        let token_supply_raw = ctx.accounts.token_mint.supply.max(1);
+        let tokens_to_sell_raw = amount;
 
-        let liquidity_balance = liquidity_balance_raw / 1e6;
-        let token_supply = token_supply_raw / 1e9;
-        let tokens_to_sell = tokens_to_sell_raw / 1e9;
+        let liquidity_balance = (liquidity_balance_raw as u128) * 1_000_000_000 / 1_000_000;
+        let token_supply = (token_supply_raw as u128) * 1_000_000_000 / 1_000_000_000;
+        let tokens_to_sell = (tokens_to_sell_raw as u128) * 1_000_000_000 / 1_000_000_000;
 
         let price_per_token = liquidity_balance / token_supply;
         let total_value = tokens_to_sell * price_per_token;
-        let total_value_scaled = total_value * 1e6;
-        let locked_share =
-            ((LOCKED_LIQUIDITY_BPS as f64 / 10_000.0) * total_value_scaled).round() as u64;
-        let team_cut_u64 = ((TEAM_FEE_BPS as f64 / 10_000.0) * total_value_scaled).round() as u64;
-        let founders_cut_u64 =
-            ((FOUNDER_FEE_BPS as f64 / 10_000.0) * total_value_scaled).round() as u64;
+        let total_value_scaled = total_value / 1_000_000_000;
 
-        let user_cut_u64 = (total_value_scaled
-            - team_cut_u64 as f64
-            - founders_cut_u64 as f64
-            - locked_share as f64)
-            .round() as u64;
+        let locked_share = (total_value_scaled * LOCKED_LIQUIDITY_BPS as u128) / 10_000;
+        let team_cut_u64 = (total_value_scaled * TEAM_FEE_BPS as u128) / 10_000;
+        let founders_cut_u64 = (total_value_scaled * FOUNDER_FEE_BPS as u128) / 10_000;
+
+        let user_cut_u64 = total_value_scaled - team_cut_u64 - founders_cut_u64 - locked_share;
+
+        let team_cut_u64 = team_cut_u64 as u64;
+        let founders_cut_u64 = founders_cut_u64 as u64;
+        let user_cut_u64 = user_cut_u64 as u64;
 
         token::burn(
             CpiContext::new(
@@ -484,16 +492,18 @@ pub mod up_only {
         let usdc_for_tokens = total_usdc - team_share - founder_fee - locked_share;
 
         let liquidity_balance =
-            token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?
-                as f64;
-        let token_supply = ctx.accounts.token_mint.supply as f64;
+            token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?;
+        let token_supply = ctx.accounts.token_mint.supply;
 
-        let price_start = liquidity_balance / token_supply.max(1.0);
-        let estimated_tokens = (usdc_for_tokens as f64) / price_start;
-        let liquidity_growth = liquidity_balance + usdc_for_tokens as f64 + locked_share as f64;
-        let price_end = (liquidity_growth) / (token_supply + estimated_tokens);
-        let avg_price = (price_start + price_end) / 2.0;
-        let mintable_tokens = ((usdc_for_tokens as f64) / avg_price).floor() as u64;
+        let price_start =
+            (liquidity_balance as u128) * 1_000_000_000 / (token_supply.max(1) as u128);
+        let estimated_tokens = (usdc_for_tokens as u128) * 1_000_000_000 / price_start;
+        let liquidity_growth =
+            (liquidity_balance as u128) + (usdc_for_tokens as u128) + (locked_share as u128);
+        let price_end =
+            liquidity_growth * 1_000_000_000 / ((token_supply as u128) + estimated_tokens);
+        let avg_price = (price_start + price_end) / 2;
+        let mintable_tokens = ((usdc_for_tokens as u128) * 1_000_000_000 / avg_price) as u64;
 
         if let Some(ref_pubkey) = referral {
             let referral_token_account = ctx
@@ -1392,7 +1402,7 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 4 + 6 + 4 + 2 + 160 + 1, 
+        space = 8 + 4 + 6 + 4 + 2 + 160 + 1,
         seeds = [b"metadata", up_only_mint.key().as_ref()],
         bump
     )]
@@ -1435,7 +1445,7 @@ pub struct InitializeFoundersPool<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 8 + 1924 + 484 + 1, 
+        space = 8 + 8 + 1924 + 484 + 1,
         seeds = [b"founders_pool"],
         bump
     )]
