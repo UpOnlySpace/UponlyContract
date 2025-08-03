@@ -180,7 +180,7 @@ pub mod up_only {
         Ok(())
     }
 
-    pub fn buy_token(ctx: Context<BuyToken>, amount: u64, _referral: Option<Pubkey>) -> Result<()> {
+    pub fn buy_token(ctx: Context<BuyToken>, amount: u64) -> Result<()> {
         let user_state = &ctx.accounts.user_state;
         require!(user_state.has_pass, CustomError::NoPass);
 
