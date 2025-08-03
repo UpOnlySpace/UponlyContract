@@ -1244,6 +1244,10 @@ pub mod up_only {
         let pool = &mut ctx.accounts.founders_pool;
         require!(pool.founder_count < 60, CustomError::FounderLimitReached);
 
+        if pool.founders[..pool.founder_count as usize].contains(&new_founder) {
+            return Err(CustomError::DuplicateFounder.into());
+        }
+
         let index = pool.founder_count as usize;
         pool.founders[index] = new_founder;
         pool.claim_status[index] = 0;
@@ -1763,7 +1767,7 @@ pub struct Leverage<'info> {
     #[account(mut)]
     pub borrow_pool_usdc_account: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: PDA that should sign for the pool’s ATA
+    /// CHECK: PDA that should sign for the pool's ATA
     #[account(seeds = [b"borrow_pool_authority"], bump)]
     pub borrow_pool_authority: UncheckedAccount<'info>,
 }
@@ -2301,4 +2305,7 @@ pub enum CustomError {
 
     #[msg("Borrow pool has insufficient funds")]
     InsufficientBorrowPool,
+
+    #[msg("Duplicate founder")]
+    DuplicateFounder,
 }
