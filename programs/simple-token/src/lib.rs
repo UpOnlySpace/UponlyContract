@@ -77,6 +77,25 @@ pub mod up_only {
     }
 
     pub fn initialize_founders_pool(ctx: Context<InitializeFoundersPool>) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.metadata.deployer,
+            CustomError::Unauthorized
+        );
+
+        require!(
+            ctx.accounts.usdc_mint.key() == ctx.accounts.metadata.payment_token,
+            CustomError::InvalidDeployerAccount
+        );
+
+        let expected_founder_pool_token_account = anchor_spl::associated_token::get_associated_token_address(
+            &ctx.accounts.founder_authority.key(),
+            &ctx.accounts.usdc_mint.key(),
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.key() == expected_founder_pool_token_account,
+            CustomError::InvalidDeployerAccount
+        );
+
         let pool = &mut ctx.accounts.founders_pool;
         pool.total_collected = 0;
         pool.founder_count = 0;
@@ -1473,6 +1492,15 @@ pub struct InitializeFoundersPool<'info> {
     pub founder_pool_token_account: AccountInfo<'info>,
 
     pub usdc_mint: Account<'info, Mint>,
+
+    #[account(
+        seeds = [b"metadata", token_mint.key().as_ref()],
+        bump
+    )]
+    pub metadata: Account<'info, TokenMetadata>,
+
+    #[account(mut)]
+    pub token_mint: Account<'info, Mint>,
 
     #[account(mut)]
     pub authority: Signer<'info>,

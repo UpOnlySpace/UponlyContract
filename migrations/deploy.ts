@@ -206,6 +206,8 @@ async function main() {
         founderAuthority: founderAuthorityPda,
         founderPoolTokenAccount: founderPoolTokenAccount,
         usdcMint: usdcMint,
+        metadata: metadataPda,
+        tokenMint: upOnlyMint,
         systemProgram: SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
