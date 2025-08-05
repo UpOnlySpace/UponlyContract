@@ -18,6 +18,11 @@ pub mod up_only {
             return Err(CustomError::AlreadyInitialized.into());
         }
 
+        validate_token_mint(&ctx.accounts.user_payment_token_account, ctx.accounts.payment_token_mint.key())?;
+        validate_token_mint(&ctx.accounts.program_payment_token_account, ctx.accounts.payment_token_mint.key())?;
+        validate_token_mint(&ctx.accounts.user_up_only_account, ctx.accounts.up_only_mint.key())?;
+        validate_token_mint(&ctx.accounts.program_up_only_account, ctx.accounts.up_only_mint.key())?;
+
         let (mint_authority, _) =
             Pubkey::find_program_address(&[b"mint_authority"], ctx.program_id);
 
@@ -122,6 +127,13 @@ pub mod up_only {
         let user_state = &mut ctx.accounts.user_state;
         require!(!user_state.has_pass, CustomError::AlreadyHasPass);
 
+        validate_token_mint(&ctx.accounts.user_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.deployer_usdc_account, ctx.accounts.metadata.payment_token)?;
+        
+        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
+            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
+        }
+
         if !user_state.referral_set {
             if let Some(ref_pubkey) = referral {
                 require!(
@@ -202,6 +214,16 @@ pub mod up_only {
     pub fn buy_token(ctx: Context<BuyToken>, amount: u64) -> Result<()> {
         let user_state = &ctx.accounts.user_state;
         require!(user_state.has_pass, CustomError::NoPass);
+
+        validate_token_mint(&ctx.accounts.user_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.deployer_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.program_payment_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.user_token_account, ctx.accounts.metadata.mint)?;
+        validate_token_mint(&ctx.accounts.founder_pool_token_account, ctx.accounts.metadata.payment_token)?;
+        
+        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
+            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
+        }
 
         let price = amount;
 
@@ -333,6 +355,16 @@ pub mod up_only {
 
     pub fn sell_token(ctx: Context<SellToken>, amount: u64) -> Result<()> {
         let user_state = &ctx.accounts.user_state;
+
+        validate_token_mint(&ctx.accounts.user_token_account, ctx.accounts.metadata.mint)?;
+        validate_token_mint(&ctx.accounts.user_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.deployer_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.program_payment_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.founder_pool_token_account, ctx.accounts.metadata.payment_token)?;
+        
+        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
+            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
+        }
 
         let liquidity_balance_raw =
             token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?;
@@ -505,6 +537,17 @@ pub mod up_only {
             CustomError::InvalidLockPeriod
         );
 
+        // Validate token mints
+        validate_token_mint(&ctx.accounts.user_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.deployer_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.program_payment_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.vault_token_account, ctx.accounts.metadata.mint)?;
+        validate_token_mint(&ctx.accounts.founder_pool_token_account, ctx.accounts.metadata.payment_token)?;
+        
+        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
+            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
+        }
+
         let config = get_lock_fee_config(lock_days);
         let total_usdc = amount;
         let team_share = total_usdc * config.team_bps / 10_000;
@@ -639,6 +682,12 @@ pub mod up_only {
             CustomError::LockPeriodNotOver
         );
 
+        validate_token_mint(&ctx.accounts.vault_token_account, ctx.accounts.metadata.mint)?;
+        validate_token_mint(&ctx.accounts.user_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.deployer_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.program_payment_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.founder_pool_token_account, ctx.accounts.metadata.payment_token)?;
+
         let token_amount = lock_state.amount;
         let lock_days = lock_state.lock_days;
         let config = get_lock_fee_config(lock_days);
@@ -732,6 +781,12 @@ pub mod up_only {
         let lock_state = &mut ctx.accounts.lock_state;
 
         require!(lock_state.initialized, CustomError::AlreadyClaimed);
+
+        validate_token_mint(&ctx.accounts.vault_token_account, ctx.accounts.metadata.mint)?;
+        validate_token_mint(&ctx.accounts.user_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.deployer_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.program_payment_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.founder_pool_token_account, ctx.accounts.metadata.payment_token)?;
 
         let token_amount = lock_state.amount;
         let lock_days = lock_state.lock_days;
@@ -850,6 +905,17 @@ pub mod up_only {
             matches!(lock_days, 3 | 7 | 14 | 30 | 60 | 90 | 180),
             CustomError::InvalidLockPeriod
         );
+
+        validate_token_mint(&ctx.accounts.user_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.deployer_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.program_payment_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.vault_token_account, ctx.accounts.metadata.mint)?;
+        validate_token_mint(&ctx.accounts.founder_pool_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.borrow_pool_usdc_account, ctx.accounts.metadata.payment_token)?;
+        
+        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
+            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
+        }
 
         let total_usdc = amount
             .checked_mul(leverage_multiplier as u64)
@@ -1016,6 +1082,13 @@ pub mod up_only {
             CustomError::LockPeriodNotOver
         );
 
+        validate_token_mint(&ctx.accounts.vault_token_account, ctx.accounts.metadata.mint)?;
+        validate_token_mint(&ctx.accounts.user_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.deployer_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.program_payment_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.founder_pool_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.borrow_pool_usdc_account, ctx.accounts.metadata.payment_token)?;
+
         let amount_minted = position.amount_minted;
         let liquidity_balance_raw =
             token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?
@@ -1136,6 +1209,13 @@ pub mod up_only {
     pub fn early_close_leverage(ctx: Context<EarlyCloseLeverage>) -> Result<()> {
         let leverage_position = &mut ctx.accounts.leverage_position;
         require!(leverage_position.initialized, CustomError::AlreadyClaimed);
+
+        validate_token_mint(&ctx.accounts.vault_token_account, ctx.accounts.metadata.mint)?;
+        validate_token_mint(&ctx.accounts.user_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.deployer_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.program_payment_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.founder_pool_token_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.borrow_pool_usdc_account, ctx.accounts.metadata.payment_token)?;
 
         let amount_minted = leverage_position.amount_minted;
         let lock_days = leverage_position.lock_days;
@@ -1302,6 +1382,11 @@ pub mod up_only {
 
         pool.claim_status[idx] += claimable;
 
+        require!(
+            ctx.accounts.founder_token_account.mint == ctx.accounts.founder_pool_token_account.mint,
+            CustomError::InvalidTokenMint
+        );
+
         let bump = ctx.bumps.founder_authority;
         let signer_seeds: &[&[&[u8]]] = &[&[b"founder_authority".as_ref(), &[bump]]];
 
@@ -1337,6 +1422,9 @@ pub mod up_only {
             CustomError::Unauthorized
         );
 
+        validate_token_mint(&ctx.accounts.admin_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.borrow_pool_usdc_account, ctx.accounts.metadata.payment_token)?;
+
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             Transfer {
@@ -1360,6 +1448,9 @@ pub mod up_only {
             CustomError::Unauthorized
         );
 
+        validate_token_mint(&ctx.accounts.borrow_pool_usdc_account, ctx.accounts.metadata.payment_token)?;
+        validate_token_mint(&ctx.accounts.admin_usdc_account, ctx.accounts.metadata.payment_token)?;
+
         let bump = ctx.bumps.borrow_pool_authority;
         let signer_seeds: &[&[&[u8]]] = &[&[b"borrow_pool_authority", &[bump]]];
 
@@ -1381,6 +1472,14 @@ pub mod up_only {
             .saturating_sub(amount);
         Ok(())
     }
+}
+
+fn validate_token_mint(token_account: &Account<TokenAccount>, expected_mint: Pubkey) -> Result<()> {
+    require!(
+        token_account.mint == expected_mint,
+        CustomError::InvalidTokenMint
+    );
+    Ok(())
 }
 
 pub fn get_lock_fee_config(lock_days: u64) -> LockFeeConfig {
@@ -2345,4 +2444,7 @@ pub enum CustomError {
 
     #[msg("Insufficient amount to mint tokens")]
     InsufficientAmount,
+
+    #[msg("Invalid token mint")]
+    InvalidTokenMint,
 }
