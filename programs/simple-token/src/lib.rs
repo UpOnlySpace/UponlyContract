@@ -3,7 +3,7 @@ use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
 
-declare_id!("Gj5uHr66YFdJLKx6yY4hasp8XzG4tkGLBK43GshhN4BM");
+declare_id!("599uvzF9LKpe7pqjnLpfbkyQVmtSsYouBCgqVHRZKSCE");
 
 #[program]
 pub mod up_only {
@@ -533,7 +533,7 @@ pub mod up_only {
         let lock_state = &mut ctx.accounts.lock_state;
         require!(!lock_state.initialized, CustomError::AlreadyInitialized);
         require!(
-            matches!(lock_days, 3 | 7 | 14 | 30 | 60 | 90 | 180),
+            matches!(lock_days, 1 | 2 | 3 | 4 | 6 | 8 | 12),
             CustomError::InvalidLockPeriod
         );
 
@@ -664,7 +664,7 @@ pub mod up_only {
 
         lock_state.user = ctx.accounts.user.key();
         lock_state.amount = mintable_tokens;
-        lock_state.unlock_time = clock.unix_timestamp + (lock_days as i64) * 86400;
+        lock_state.unlock_time = clock.unix_timestamp + (lock_days as i64) * 3600;
         lock_state.referral = referral;
         lock_state.initialized = true;
         lock_state.lock_days = lock_days;
@@ -902,7 +902,7 @@ pub mod up_only {
         );
 
         require!(
-            matches!(lock_days, 3 | 7 | 14 | 30 | 60 | 90 | 180),
+            matches!(lock_days, 1 | 2 | 3 | 4 | 6 | 8 | 12),
             CustomError::InvalidLockPeriod
         );
 
@@ -1064,7 +1064,7 @@ pub mod up_only {
         leverage_position.user = ctx.accounts.user.key();
         leverage_position.amount_user_paid = amount;
         leverage_position.amount_borrowed = borrow_amount;
-        leverage_position.unlock_time = clock.unix_timestamp + (lock_days as i64) * 86400;
+        leverage_position.unlock_time = clock.unix_timestamp + (lock_days as i64) * 3600;
         leverage_position.referral = referral;
         leverage_position.initialized = true;
         leverage_position.lock_days = lock_days;
@@ -1484,39 +1484,44 @@ fn validate_token_mint(token_account: &Account<TokenAccount>, expected_mint: Pub
 
 pub fn get_lock_fee_config(lock_days: u64) -> LockFeeConfig {
     match lock_days {
-        0..=3 => LockFeeConfig {
+        1 => LockFeeConfig {
             liquidity_bps: 150,
             team_bps: 75,
             founder_bps: 25,
         },
-        4..=7 => LockFeeConfig {
+        2 => LockFeeConfig {
             liquidity_bps: 225,
             team_bps: 100,
             founder_bps: 25,
         },
-        8..=14 => LockFeeConfig {
+        3 => LockFeeConfig {
             liquidity_bps: 300,
             team_bps: 125,
             founder_bps: 25,
         },
-        15..=30 => LockFeeConfig {
+        4 => LockFeeConfig {
             liquidity_bps: 375,
             team_bps: 150,
             founder_bps: 25,
         },
-        32..=60 => LockFeeConfig {
+        6 => LockFeeConfig {
             liquidity_bps: 450,
             team_bps: 175,
             founder_bps: 25,
         },
-        61..=90 => LockFeeConfig {
+        8 => LockFeeConfig {
             liquidity_bps: 550,
             team_bps: 200,
             founder_bps: 25,
         },
-        _ => LockFeeConfig {
+        12 => LockFeeConfig {
             liquidity_bps: 725,
             team_bps: 250,
+            founder_bps: 25,
+        },
+        _ => LockFeeConfig {
+            liquidity_bps: 925,
+            team_bps: 300,
             founder_bps: 25,
         },
     }
