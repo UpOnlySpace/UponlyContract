@@ -92,6 +92,11 @@ pub mod up_only {
             CustomError::InvalidDeployerAccount
         );
 
+        require!(
+            ctx.accounts.token_mint.key() == ctx.accounts.metadata.mint,
+            CustomError::InvalidTokenMint
+        );
+
         let expected_founder_pool_token_account = anchor_spl::associated_token::get_associated_token_address(
             &ctx.accounts.founder_authority.key(),
             &ctx.accounts.usdc_mint.key(),
