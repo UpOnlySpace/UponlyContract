@@ -3,7 +3,7 @@ use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
 
-declare_id!("599uvzF9LKpe7pqjnLpfbkyQVmtSsYouBCgqVHRZKSCE");
+declare_id!("9SETqYtVDe4tZeUxcCBmaUsFYPzhkQ8zYsMmaopqo8aA");
 
 #[program]
 pub mod up_only {
