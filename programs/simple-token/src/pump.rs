@@ -3,7 +3,13 @@ use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
 
-declare_id!("AFLHkyhCkwtD7jxWChpVd9eVM2jRVHSBkQ7XW7xPse3a");
+declare_id!("8bpu2Gj4zb4C5r8gor3dFitYHat3UkidAPPe1EsB9BMh");
+
+pub const PROGRAM_DEPLOYER: Pubkey = pubkey!("53jm8eSPZ5t7Cx8wD2wX81CtvsB8NtzFHQZwM32rYLA3");
+pub const EXPECTED_UP_ONLY_MINT: Pubkey = pubkey!("ASWjkZEud2jM3GEuwwgYVoct9aiYwLDmgguEBKvLeXKR");
+pub const EXPECTED_PAYMENT_TOKEN_MINT: Pubkey =
+    pubkey!("2taVSivabiDoPrnAD75F4qBA58DaBGVYhriuq12PFAjE");
+pub const EXPECTED_UP_USDC_MINT: Pubkey = pubkey!("C9oGu8UG7smBYnucwsfxcEAuazhhG9g359PS5oGWQ5yY");
 
 #[program]
 pub mod up_only {
@@ -14,31 +20,50 @@ pub mod up_only {
             return Err(CustomError::AlreadyInitialized.into());
         }
 
+        if ctx.accounts.global_state.initialized {
+            return Err(CustomError::AlreadyInitialized.into());
+        }
+
+        let (expected_metadata_pda, _) = Pubkey::find_program_address(
+            &[b"metadata", ctx.accounts.up_only_mint.key().as_ref()],
+            ctx.program_id,
+        );
+
+        require!(
+            ctx.accounts.metadata.key() == expected_metadata_pda,
+            CustomError::InvalidTokenMint
+        );
+
+        require!(
+            ctx.accounts.program_payment_token_account.owner == ctx.accounts.mint_authority.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.program_up_only_account.owner == ctx.accounts.mint_authority.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.program_up_usdc_account.owner == ctx.accounts.mint_authority.key(),
+            CustomError::InvalidOwner
+        );
+
+        require!(
+            ctx.accounts.authority.key() == PROGRAM_DEPLOYER,
+            CustomError::Unauthorized
+        );
+
         validate_token_mint(
             &ctx.accounts.user_payment_token_account,
-            ctx.accounts.payment_token_mint.key(),
+            EXPECTED_PAYMENT_TOKEN_MINT,
         )?;
         validate_token_mint(
             &ctx.accounts.program_payment_token_account,
-            ctx.accounts.payment_token_mint.key(),
+            EXPECTED_PAYMENT_TOKEN_MINT,
         )?;
-        validate_token_mint(
-            &ctx.accounts.user_up_only_account,
-            ctx.accounts.up_only_mint.key(),
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_up_only_account,
-            ctx.accounts.up_only_mint.key(),
-        )?;
-
-        validate_token_mint(
-            &ctx.accounts.user_up_usdc_account,
-            ctx.accounts.up_usdc_mint.key(),
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_up_usdc_account,
-            ctx.accounts.up_usdc_mint.key(),
-        )?;
+        validate_token_mint(&ctx.accounts.user_up_only_account, EXPECTED_UP_ONLY_MINT)?;
+        validate_token_mint(&ctx.accounts.program_up_only_account, EXPECTED_UP_ONLY_MINT)?;
+        validate_token_mint(&ctx.accounts.user_up_usdc_account, EXPECTED_UP_USDC_MINT)?;
+        validate_token_mint(&ctx.accounts.program_up_usdc_account, EXPECTED_UP_USDC_MINT)?;
 
         let (mint_authority, _) =
             Pubkey::find_program_address(&[b"mint_authority"], ctx.program_id);
@@ -48,12 +73,12 @@ pub mod up_only {
         let metadata = &mut ctx.accounts.metadata;
         metadata.name = "UpOnly".to_string();
         metadata.symbol = "UP".to_string();
-        metadata.mint = ctx.accounts.up_only_mint.key();
+        metadata.mint = EXPECTED_UP_ONLY_MINT;
         metadata.authority = mint_authority;
-        metadata.payment_token = ctx.accounts.payment_token_mint.key();
-        metadata.up_usdc_mint = ctx.accounts.up_usdc_mint.key();
+        metadata.payment_token = EXPECTED_PAYMENT_TOKEN_MINT;
+        metadata.up_usdc_mint = EXPECTED_UP_USDC_MINT;
         metadata.initialized = true;
-        metadata.deployer = ctx.accounts.authority.key();
+        metadata.deployer = PROGRAM_DEPLOYER;
         metadata.team = team;
 
         let cpi_context = CpiContext::new(
@@ -129,6 +154,7 @@ pub mod up_only {
 
         token::set_authority(cpi_context, AuthorityType::FreezeAccount, None)?;
 
+        ctx.accounts.global_state.initialized = true;
         Ok(())
     }
 
@@ -250,6 +276,23 @@ pub mod up_only {
             ctx.accounts.metadata.up_usdc_mint,
         )?;
 
+        require!(
+            ctx.accounts.program_payment_token_account.owner == ctx.accounts.mint_authority.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.owner == ctx.accounts.metadata.team,
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.owner == ctx.accounts.founders_pool.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.user_usdc_account.owner == ctx.accounts.user.key(),
+            CustomError::InvalidOwner
+        );
+
         if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
             validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
         }
@@ -369,7 +412,7 @@ pub mod up_only {
                 },
                 up_usdc_signer_seeds,
             ),
-            usdc_for_tokens,
+            usdc_for_tokens + locked_share,
         )?;
 
         let mint_bump = ctx.bumps.mint_authority;
@@ -428,6 +471,23 @@ pub mod up_only {
             &ctx.accounts.founder_pool_token_account,
             ctx.accounts.metadata.payment_token,
         )?;
+
+        require!(
+            ctx.accounts.program_payment_token_account.owner == ctx.accounts.pool_authority.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.owner == ctx.accounts.metadata.team,
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.owner == ctx.accounts.founders_pool.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.user_usdc_account.owner == ctx.accounts.user.key(),
+            CustomError::InvalidOwner
+        );
 
         let token_amount = lock_state.amount;
         let lock_days = lock_state.lock_days;
@@ -527,7 +587,7 @@ pub mod up_only {
                 },
                 up_pool_signer_seeds,
             ),
-            total_value_scaled.round() as u64,
+            user_receives + team_fee + founder_fee,
         )?;
 
         lock_state.initialized = false;
@@ -561,6 +621,19 @@ pub mod up_only {
             &ctx.accounts.founder_pool_token_account,
             ctx.accounts.metadata.payment_token,
         )?;
+
+        require!(
+            ctx.accounts.program_payment_token_account.owner == ctx.accounts.pool_authority.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.owner == ctx.accounts.metadata.team,
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.owner == ctx.accounts.founders_pool.key(),
+            CustomError::InvalidOwner
+        );
 
         let token_amount = lock_state.amount;
         let lock_days = lock_state.lock_days;
@@ -666,7 +739,7 @@ pub mod up_only {
                 },
                 up_pool_signer_seeds,
             ),
-            total_value_scaled.round() as u64,
+            user_receives + team_fee + founder_fee,
         )?;
 
         lock_state.initialized = false;
@@ -793,6 +866,23 @@ pub mod up_only {
             ctx.accounts.metadata.up_usdc_mint,
         )?;
 
+        require!(
+            ctx.accounts.program_payment_token_account.owner == ctx.accounts.mint_authority.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.owner == ctx.accounts.metadata.team,
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.owner == ctx.accounts.founders_pool.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.user_usdc_account.owner == ctx.accounts.user.key(),
+            CustomError::InvalidOwner
+        );
+
         if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
             validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
         }
@@ -812,7 +902,7 @@ pub mod up_only {
         let user_amount_after_fees =
             total_usdc - borrow_amount - team_share - founder_fee - locked_share;
         let liquidity_balance =
-            token::accessor::amount(&ctx.accounts.program_payment_token_account.to_account_info())?;
+            token::accessor::amount(&ctx.accounts.program_up_usdc_account.to_account_info())?;
 
         let token_supply = ctx.accounts.token_mint.supply;
 
@@ -893,7 +983,6 @@ pub mod up_only {
         let pool = &mut ctx.accounts.founders_pool;
         pool.total_collected += founder_fee;
 
-        // Transfer user's USDC to program for liquidity
         token::transfer(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -920,20 +1009,7 @@ pub mod up_only {
                 },
                 up_usdc_signer_seeds,
             ),
-            amount,
-        )?;
-
-        token::mint_to(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                token::MintTo {
-                    mint: ctx.accounts.up_usdc_mint.to_account_info(),
-                    to: ctx.accounts.program_up_usdc_account.to_account_info(),
-                    authority: ctx.accounts.up_usdc_mint_authority.to_account_info(),
-                },
-                up_usdc_signer_seeds,
-            ),
-            borrow_amount,
+            usdc_for_tokens + locked_share,
         )?;
 
         let mint_bump = ctx.bumps.mint_authority;
@@ -1002,6 +1078,27 @@ pub mod up_only {
             ctx.accounts.metadata.up_usdc_mint,
         )?;
 
+        require!(
+            ctx.accounts.program_payment_token_account.owner == ctx.accounts.pool_authority.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.owner == ctx.accounts.metadata.team,
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.owner == ctx.accounts.founders_pool.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.user_usdc_account.owner == ctx.accounts.user.key(),
+            CustomError::InvalidOwner
+        );
+
+        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
+            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
+        }
+
         let amount_minted = position.amount_minted;
         let liquidity_balance_raw =
             token::accessor::amount(&ctx.accounts.program_up_usdc_account.to_account_info())?
@@ -1050,13 +1147,6 @@ pub mod up_only {
         let up_pool_signer_seeds: &[&[&[u8]]] =
             &[&[b"token_account", up_mint_key.as_ref(), &[up_pool_bump]]];
 
-        let mut up_usdc_to_burn = total_value_scaled.round() as u64;
-        if liquidity_fee <= up_usdc_to_burn {
-            up_usdc_to_burn -= liquidity_fee;
-        } else {
-            up_usdc_to_burn = 0;
-        }
-
         token::burn(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
@@ -1067,7 +1157,7 @@ pub mod up_only {
                 },
                 up_pool_signer_seeds,
             ),
-            up_usdc_to_burn,
+            user_cut + team_fee + founder_fee + borrowed as u64,
         )?;
 
         let pool_bump = ctx.bumps.pool_authority;
@@ -1089,18 +1179,60 @@ pub mod up_only {
             ),
             founder_fee,
         )?;
-        token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.program_payment_token_account.to_account_info(),
-                    to: ctx.accounts.deployer_usdc_account.to_account_info(),
-                    authority: ctx.accounts.pool_authority.to_account_info(),
-                },
-                pool_seeds,
-            ),
-            team_fee,
-        )?;
+
+        if let Some(ref_pubkey) = position.referral {
+            let referral_token_account = ctx
+                .accounts
+                .referral_usdc_account
+                .as_ref()
+                .ok_or(CustomError::MissingReferralAccount)?;
+            require!(
+                referral_token_account.owner == ref_pubkey,
+                CustomError::InvalidReferral
+            );
+
+            let referral_share = team_fee / 2;
+            let deployer_share = team_fee - referral_share;
+
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: referral_token_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                referral_share,
+            )?;
+
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: ctx.accounts.deployer_usdc_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                deployer_share,
+            )?;
+        } else {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: ctx.accounts.deployer_usdc_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                team_fee,
+            )?;
+        }
 
         if user_cut > 0 {
             token::transfer(
@@ -1153,6 +1285,23 @@ pub mod up_only {
             &ctx.accounts.program_up_usdc_account,
             ctx.accounts.metadata.up_usdc_mint,
         )?;
+
+        require!(
+            ctx.accounts.program_payment_token_account.owner == ctx.accounts.pool_authority.key(),
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.owner == ctx.accounts.metadata.team,
+            CustomError::InvalidOwner
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.owner == ctx.accounts.founders_pool.key(),
+            CustomError::InvalidOwner
+        );
+
+        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
+            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
+        }
 
         let amount_minted = leverage_position.amount_minted;
         let lock_days = leverage_position.lock_days;
@@ -1207,13 +1356,6 @@ pub mod up_only {
         let up_pool_signer_seeds: &[&[&[u8]]] =
             &[&[b"token_account", up_mint_key.as_ref(), &[up_pool_bump]]];
 
-        let mut up_usdc_to_burn = total_value_scaled.round() as u64;
-        if liquidity_fee <= up_usdc_to_burn {
-            up_usdc_to_burn -= liquidity_fee;
-        } else {
-            up_usdc_to_burn = 0;
-        }
-
         token::burn(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
@@ -1224,7 +1366,7 @@ pub mod up_only {
                 },
                 up_pool_signer_seeds,
             ),
-            up_usdc_to_burn,
+            user_cut + team_fee + founder_fee + borrowed as u64,
         )?;
 
         let pool_bump = ctx.bumps.pool_authority;
@@ -1247,18 +1389,59 @@ pub mod up_only {
             founder_fee,
         )?;
 
-        token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.program_payment_token_account.to_account_info(),
-                    to: ctx.accounts.deployer_usdc_account.to_account_info(),
-                    authority: ctx.accounts.pool_authority.to_account_info(),
-                },
-                pool_seeds,
-            ),
-            team_fee,
-        )?;
+        if let Some(ref_pubkey) = leverage_position.referral {
+            let referral_token_account = ctx
+                .accounts
+                .referral_usdc_account
+                .as_ref()
+                .ok_or(CustomError::MissingReferralAccount)?;
+            require!(
+                referral_token_account.owner == ref_pubkey,
+                CustomError::InvalidReferral
+            );
+
+            let referral_share = team_fee / 2;
+            let deployer_share = team_fee - referral_share;
+
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: referral_token_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                referral_share,
+            )?;
+
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: ctx.accounts.deployer_usdc_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                deployer_share,
+            )?;
+        } else {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.program_payment_token_account.to_account_info(),
+                        to: ctx.accounts.deployer_usdc_account.to_account_info(),
+                        authority: ctx.accounts.pool_authority.to_account_info(),
+                    },
+                    pool_seeds,
+                ),
+                team_fee,
+            )?;
+        }
 
         if user_cut > 0 {
             token::transfer(
@@ -1357,6 +1540,7 @@ pub struct Initialize<'info> {
     #[account(mut)]
     pub program_up_only_account: Account<'info, TokenAccount>,
 
+    #[account(address = EXPECTED_PAYMENT_TOKEN_MINT)]
     pub payment_token_mint: Account<'info, Mint>,
 
     #[account(mut)]
@@ -1365,7 +1549,7 @@ pub struct Initialize<'info> {
     #[account(mut)]
     pub program_payment_token_account: Account<'info, TokenAccount>,
 
-    #[account(mut)]
+    #[account(mut, address = EXPECTED_UP_USDC_MINT)]
     pub up_usdc_mint: Account<'info, Mint>,
 
     #[account(mut)]
@@ -1391,8 +1575,17 @@ pub struct Initialize<'info> {
     pub current_mint_authority: Signer<'info>,
     pub current_up_usdc_authority: Signer<'info>,
 
-    #[account(mut)]
+    #[account(mut, address = PROGRAM_DEPLOYER)]
     pub authority: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = authority,
+        space = 8 + 1,
+        seeds = [b"global_state"],
+        bump
+    )]
+    pub global_state: Account<'info, GlobalState>,
 
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
@@ -1694,6 +1887,9 @@ pub struct LeverageSell<'info> {
     )]
     /// CHECK: PDA used as signer for burning from program_up_usdc_account
     pub up_pool_authority: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub referral_usdc_account: Option<Account<'info, TokenAccount>>,
 }
 
 #[derive(Accounts)]
@@ -1767,6 +1963,9 @@ pub struct EarlyCloseLeverage<'info> {
     )]
     /// CHECK: PDA used as signer for burning from program_up_usdc_account
     pub up_pool_authority: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub referral_usdc_account: Option<Account<'info, TokenAccount>>,
 }
 
 #[derive(Accounts)]
@@ -1969,6 +2168,11 @@ pub struct InitializeLeverageUserVault<'info> {
 }
 
 #[account]
+pub struct GlobalState {
+    pub initialized: bool,
+}
+
+#[account]
 pub struct UserState {
     pub referral: Pubkey,
     pub referral_set: bool,
@@ -2072,4 +2276,7 @@ pub enum CustomError {
 
     #[msg("Invalid token mint")]
     InvalidTokenMint,
+
+    #[msg("Invalid token account owner")]
+    InvalidOwner,
 }
