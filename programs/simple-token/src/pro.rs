@@ -3,13 +3,8 @@ use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
 
-declare_id!("8bpu2Gj4zb4C5r8gor3dFitYHat3UkidAPPe1EsB9BMh");
+declare_id!("FVeKG9L7sk8bQhyT5mnFrvbwUbMMJAU61zYPNMssx8cu");
 
-pub const PROGRAM_DEPLOYER: Pubkey = pubkey!("53jm8eSPZ5t7Cx8wD2wX81CtvsB8NtzFHQZwM32rYLA3");
-pub const EXPECTED_UP_ONLY_MINT: Pubkey = pubkey!("ASWjkZEud2jM3GEuwwgYVoct9aiYwLDmgguEBKvLeXKR");
-pub const EXPECTED_PAYMENT_TOKEN_MINT: Pubkey =
-    pubkey!("2taVSivabiDoPrnAD75F4qBA58DaBGVYhriuq12PFAjE");
-pub const EXPECTED_UP_USDC_MINT: Pubkey = pubkey!("C9oGu8UG7smBYnucwsfxcEAuazhhG9g359PS5oGWQ5yY");
 
 #[program]
 pub mod up_only {
@@ -33,8 +28,17 @@ pub mod up_only {
             CustomError::InvalidTokenMint
         );
 
+        let (pool_authority, _) = Pubkey::find_program_address(
+            &[b"token_account", ctx.accounts.payment_token_mint.key().as_ref()],
+            ctx.program_id,
+        );
+        let (up_pool_authority, _) = Pubkey::find_program_address(
+            &[b"token_account", ctx.accounts.up_usdc_mint.key().as_ref()],
+            ctx.program_id,
+        );
+
         require!(
-            ctx.accounts.program_payment_token_account.owner == ctx.accounts.mint_authority.key(),
+            ctx.accounts.program_payment_token_account.owner == pool_authority,
             CustomError::InvalidOwner
         );
         require!(
@@ -42,41 +46,11 @@ pub mod up_only {
             CustomError::InvalidOwner
         );
         require!(
-            ctx.accounts.program_up_usdc_account.owner == ctx.accounts.mint_authority.key(),
+            ctx.accounts.program_up_usdc_account.owner == up_pool_authority,
             CustomError::InvalidOwner
         );
 
-        require!(
-            ctx.accounts.authority.key() == PROGRAM_DEPLOYER,
-            CustomError::Unauthorized
-        );
-
-        validate_token_mint(
-            &ctx.accounts.user_payment_token_account,
-            EXPECTED_PAYMENT_TOKEN_MINT,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_payment_token_account,
-            EXPECTED_PAYMENT_TOKEN_MINT,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.user_up_only_account,
-            EXPECTED_UP_ONLY_MINT,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_up_only_account,
-            EXPECTED_UP_ONLY_MINT,
-        )?;
-
-        validate_token_mint(
-            &ctx.accounts.user_up_usdc_account,
-            EXPECTED_UP_USDC_MINT,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_up_usdc_account,
-            EXPECTED_UP_USDC_MINT,
-        )?;
-
+        // Token account mints are validated via Anchor constraints in account struct
         let (mint_authority, _) =
             Pubkey::find_program_address(&[b"mint_authority"], ctx.program_id);
         let (up_usdc_mint_authority, _) =
@@ -85,12 +59,12 @@ pub mod up_only {
         let metadata = &mut ctx.accounts.metadata;
         metadata.name = "UpOnly".to_string();
         metadata.symbol = "UP".to_string();
-        metadata.mint = EXPECTED_UP_ONLY_MINT;
+        metadata.mint = ctx.accounts.up_only_mint.key();
         metadata.authority = mint_authority;
-        metadata.payment_token = EXPECTED_PAYMENT_TOKEN_MINT;
-        metadata.up_usdc_mint = EXPECTED_UP_USDC_MINT;
+        metadata.payment_token = ctx.accounts.payment_token_mint.key();
+        metadata.up_usdc_mint = ctx.accounts.up_usdc_mint.key();
         metadata.initialized = true;
-        metadata.deployer = PROGRAM_DEPLOYER;
+        metadata.deployer = ctx.accounts.authority.key();
         metadata.team = team;
 
         let cpi_context = CpiContext::new(
@@ -197,18 +171,20 @@ pub mod up_only {
         pool.founders = vec![Pubkey::default(); 60];
         pool.claim_status = vec![0u64; 60];
 
-        let cpi_ctx = CpiContext::new(
-            ctx.accounts.associated_token_program.to_account_info(),
-            anchor_spl::associated_token::Create {
-                payer: ctx.accounts.authority.to_account_info(),
-                associated_token: ctx.accounts.founder_pool_token_account.to_account_info(),
-                authority: ctx.accounts.founder_authority.to_account_info(),
-                mint: ctx.accounts.usdc_mint.to_account_info(),
-                system_program: ctx.accounts.system_program.to_account_info(),
-                token_program: ctx.accounts.token_program.to_account_info(),
-            },
-        );
-        anchor_spl::associated_token::create(cpi_ctx)?;
+        if ctx.accounts.founder_pool_token_account.lamports() == 0 {
+            let cpi_ctx = CpiContext::new(
+                ctx.accounts.associated_token_program.to_account_info(),
+                anchor_spl::associated_token::Create {
+                    payer: ctx.accounts.authority.to_account_info(),
+                    associated_token: ctx.accounts.founder_pool_token_account.to_account_info(),
+                    authority: ctx.accounts.founder_authority.to_account_info(),
+                    mint: ctx.accounts.usdc_mint.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                },
+            );
+            anchor_spl::associated_token::create(cpi_ctx)?;
+        }
 
         Ok(())
     }
@@ -253,55 +229,70 @@ pub mod up_only {
         let lock_state = &mut ctx.accounts.lock_state;
         require!(!lock_state.initialized, CustomError::AlreadyInitialized);
 
-        validate_token_mint(
-            &ctx.accounts.user_usdc_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.deployer_usdc_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_payment_token_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.vault_token_account,
-            ctx.accounts.metadata.mint,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.founder_pool_token_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.user_up_usdc_account,
-            ctx.accounts.metadata.up_usdc_mint,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_up_usdc_account,
-            ctx.accounts.metadata.up_usdc_mint,
-        )?;
+        require!(ctx.accounts.metadata.initialized, CustomError::AlreadyInitialized);
+        
+        let payment_token_mint = ctx.accounts.metadata.payment_token;
+        require!(
+            ctx.accounts.vault_token_account.mint == ctx.accounts.metadata.mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.user_usdc_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.program_payment_token_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
 
-        require!(
-            ctx.accounts.program_payment_token_account.owner == ctx.accounts.mint_authority.key(),
-            CustomError::InvalidOwner
+        let expected_deployer_usdc_account = anchor_spl::associated_token::get_associated_token_address(
+            &ctx.accounts.metadata.team,
+            &ctx.accounts.metadata.payment_token,
         );
         require!(
-            ctx.accounts.deployer_usdc_account.owner == ctx.accounts.metadata.team,
-            CustomError::InvalidOwner
+            ctx.accounts.deployer_usdc_account.key() == expected_deployer_usdc_account,
+            CustomError::InvalidDeployerUsdcAccount
+        );
+
+        let (expected_pool_authority, _) = Pubkey::find_program_address(
+            &[b"token_account", ctx.accounts.metadata.payment_token.as_ref()],
+            ctx.program_id,
         );
         require!(
-            ctx.accounts.founder_pool_token_account.owner == ctx.accounts.founders_pool.key(),
-            CustomError::InvalidOwner
-        );
-        require!(
-            ctx.accounts.user_usdc_account.owner == ctx.accounts.user.key(),
+            ctx.accounts.pool_authority.key() == expected_pool_authority,
             CustomError::InvalidOwner
         );
 
-        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
-            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
-        }
+        require!(
+            ctx.accounts.user_up_usdc_account.mint == ctx.accounts.metadata.up_usdc_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.program_up_usdc_account.mint == ctx.accounts.metadata.up_usdc_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.up_usdc_mint.key() == ctx.accounts.metadata.up_usdc_mint,
+            CustomError::InvalidTokenMint
+        );
+
+        let expected_founder_pool_token_account = anchor_spl::associated_token::get_associated_token_address(
+            &ctx.accounts.founder_authority.key(),
+            &ctx.accounts.metadata.payment_token,
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.key() == expected_founder_pool_token_account,
+            CustomError::InvalidFounderPoolTokenAccount
+        );
+
+        require!(
+            ctx.accounts.program_up_usdc_account.owner == ctx.accounts.up_pool_authority.key(),
+            CustomError::InvalidOwner
+        );
 
         let config = get_lock_fee_config();
         let total_usdc = amount;
@@ -452,43 +443,56 @@ pub mod up_only {
 
         require!(lock_state.initialized, CustomError::AlreadyClaimed);
 
-        validate_token_mint(
-            &ctx.accounts.vault_token_account,
-            ctx.accounts.metadata.mint,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.user_usdc_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.deployer_usdc_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_payment_token_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.founder_pool_token_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
+        require!(ctx.accounts.metadata.initialized, CustomError::AlreadyInitialized);
+        
+        let payment_token_mint = ctx.accounts.metadata.payment_token;
+        require!(
+            ctx.accounts.vault_token_account.mint == ctx.accounts.metadata.mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.user_usdc_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.program_payment_token_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.program_up_usdc_account.mint == ctx.accounts.metadata.up_usdc_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.up_usdc_mint.key() == ctx.accounts.metadata.up_usdc_mint,
+            CustomError::InvalidTokenMint
+        );
+
+        let (expected_pool_authority, _) = Pubkey::find_program_address(
+            &[b"token_account", ctx.accounts.metadata.payment_token.as_ref()],
+            ctx.program_id,
+        );
+        require!(
+            ctx.accounts.pool_authority.key() == expected_pool_authority,
+            CustomError::InvalidOwner
+        );
 
         require!(
             ctx.accounts.program_payment_token_account.owner == ctx.accounts.pool_authority.key(),
             CustomError::InvalidOwner
         );
-        require!(
-            ctx.accounts.deployer_usdc_account.owner == ctx.accounts.metadata.team,
-            CustomError::InvalidOwner
-        );
-        require!(
-            ctx.accounts.founder_pool_token_account.owner == ctx.accounts.founders_pool.key(),
-            CustomError::InvalidOwner
-        );
 
-        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
-            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
-        }
+        require!(
+            ctx.accounts.program_up_usdc_account.owner == ctx.accounts.up_pool_authority.key(),
+            CustomError::InvalidOwner
+        );
 
         let token_amount = lock_state.amount;
         let config = get_lock_fee_config();
@@ -545,6 +549,9 @@ pub mod up_only {
             ),
             founder_fee,
         )?;
+
+        let pool = &mut ctx.accounts.founders_pool;
+        pool.total_collected += founder_fee;
 
         if let Some(ref_pubkey) = lock_state.referral {
             let referral_token_account = ctx
@@ -719,55 +726,74 @@ pub mod up_only {
             CustomError::AlreadyInitialized
         );
 
-        validate_token_mint(
-            &ctx.accounts.user_usdc_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.deployer_usdc_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_payment_token_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.vault_token_account,
-            ctx.accounts.metadata.mint,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.founder_pool_token_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.user_up_usdc_account,
-            ctx.accounts.metadata.up_usdc_mint,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_up_usdc_account,
-            ctx.accounts.metadata.up_usdc_mint,
-        )?;
+        require!(ctx.accounts.metadata.initialized, CustomError::AlreadyInitialized);
+        
+        let payment_token_mint = ctx.accounts.metadata.payment_token;
+        require!(
+            ctx.accounts.vault_token_account.mint == ctx.accounts.metadata.mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.user_usdc_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.program_payment_token_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+
+        let expected_deployer_usdc_account = anchor_spl::associated_token::get_associated_token_address(
+            &ctx.accounts.metadata.team,
+            &ctx.accounts.metadata.payment_token,
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.key() == expected_deployer_usdc_account,
+            CustomError::InvalidDeployerUsdcAccount
+        );
+
+        let (expected_pool_authority, _) = Pubkey::find_program_address(
+            &[b"token_account", ctx.accounts.metadata.payment_token.as_ref()],
+            ctx.program_id,
+        );
+        require!(
+            ctx.accounts.pool_authority.key() == expected_pool_authority,
+            CustomError::InvalidOwner
+        );
 
         require!(
-            ctx.accounts.program_payment_token_account.owner == ctx.accounts.mint_authority.key(),
-            CustomError::InvalidOwner
+            ctx.accounts.user_up_usdc_account.mint == ctx.accounts.metadata.up_usdc_mint,
+            CustomError::InvalidTokenMint
         );
         require!(
-            ctx.accounts.deployer_usdc_account.owner == ctx.accounts.metadata.team,
-            CustomError::InvalidOwner
+            ctx.accounts.program_up_usdc_account.mint == ctx.accounts.metadata.up_usdc_mint,
+            CustomError::InvalidTokenMint
         );
         require!(
-            ctx.accounts.founder_pool_token_account.owner == ctx.accounts.founders_pool.key(),
-            CustomError::InvalidOwner
+            ctx.accounts.up_usdc_mint.key() == ctx.accounts.metadata.up_usdc_mint,
+            CustomError::InvalidTokenMint
         );
-        require!(
-            ctx.accounts.user_usdc_account.owner == ctx.accounts.user.key(),
-            CustomError::InvalidOwner
-        );
-        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
-            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
-        }
 
+        let expected_founder_pool_token_account = anchor_spl::associated_token::get_associated_token_address(
+            &ctx.accounts.founder_authority.key(),
+            &ctx.accounts.metadata.payment_token,
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.key() == expected_founder_pool_token_account,
+            CustomError::InvalidFounderPoolTokenAccount
+        );
+
+        require!(
+            ctx.accounts.program_up_usdc_account.owner == ctx.accounts.up_pool_authority.key(),
+            CustomError::InvalidOwner
+        );
         let total_usdc = amount
             .checked_mul(leverage_multiplier as u64)
             .ok_or(ProgramError::InvalidArgument)?;
@@ -925,56 +951,56 @@ pub mod up_only {
         let position = &mut ctx.accounts.leverage_position;
         require!(position.initialized, CustomError::AlreadyClaimed);
 
-        validate_token_mint(
-            &ctx.accounts.vault_token_account,
-            ctx.accounts.metadata.mint,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.user_usdc_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.deployer_usdc_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_payment_token_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.founder_pool_token_account,
-            ctx.accounts.metadata.payment_token,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.user_up_usdc_account,
-            ctx.accounts.metadata.up_usdc_mint,
-        )?;
-        validate_token_mint(
-            &ctx.accounts.program_up_usdc_account,
-            ctx.accounts.metadata.up_usdc_mint,
-        )?;
+        require!(ctx.accounts.metadata.initialized, CustomError::AlreadyInitialized);
+        
+        let payment_token_mint = ctx.accounts.metadata.payment_token;
+        require!(
+            ctx.accounts.vault_token_account.mint == ctx.accounts.metadata.mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.user_usdc_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.deployer_usdc_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.program_payment_token_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.founder_pool_token_account.mint == payment_token_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.program_up_usdc_account.mint == ctx.accounts.metadata.up_usdc_mint,
+            CustomError::InvalidTokenMint
+        );
+        require!(
+            ctx.accounts.up_usdc_mint.key() == ctx.accounts.metadata.up_usdc_mint,
+            CustomError::InvalidTokenMint
+        );
 
+        let (expected_pool_authority, _) = Pubkey::find_program_address(
+            &[b"token_account", ctx.accounts.metadata.payment_token.as_ref()],
+            ctx.program_id,
+        );
+        require!(
+            ctx.accounts.pool_authority.key() == expected_pool_authority,
+            CustomError::InvalidOwner
+        );
 
         require!(
             ctx.accounts.program_payment_token_account.owner == ctx.accounts.pool_authority.key(),
             CustomError::InvalidOwner
         );
-        require!(
-            ctx.accounts.deployer_usdc_account.owner == ctx.accounts.metadata.team,
-            CustomError::InvalidOwner
-        );
-        require!(
-            ctx.accounts.founder_pool_token_account.owner == ctx.accounts.founders_pool.key(),
-            CustomError::InvalidOwner
-        );
 
-        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
-            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
-        }
-        
-        if let Some(ref referral_account) = ctx.accounts.referral_usdc_account {
-            validate_token_mint(referral_account, ctx.accounts.metadata.payment_token)?;
-        }
+        require!(
+            ctx.accounts.program_up_usdc_account.owner == ctx.accounts.up_pool_authority.key(),
+            CustomError::InvalidOwner
+        );
 
         let amount_minted = position.amount_minted;
         let liquidity_balance_raw =
@@ -989,7 +1015,6 @@ pub mod up_only {
         let total_value_scaled = total_value * 1e6;
         let borrowed = position.amount_borrowed;
 
-        // No lock period needed
         let config = get_lock_fee_config();
 
         let founder_fee =
@@ -1056,6 +1081,9 @@ pub mod up_only {
             ),
             founder_fee,
         )?;
+
+        let pool = &mut ctx.accounts.founders_pool;
+        pool.total_collected += founder_fee;
 
         if let Some(ref_pubkey) = position.referral {
             let referral_token_account = ctx
@@ -1135,16 +1163,7 @@ pub mod up_only {
     }
 }
 
-fn validate_token_mint(token_account: &Account<TokenAccount>, expected_mint: Pubkey) -> Result<()> {
-    require!(
-        token_account.mint == expected_mint,
-        CustomError::InvalidTokenMint
-    );
-    Ok(())
-}
-
 pub fn get_lock_fee_config() -> LockFeeConfig {
-    // Default fees for any lock period
     LockFeeConfig {
         liquidity_bps: 725,
         team_bps: 250,
@@ -1166,29 +1185,47 @@ pub struct Initialize<'info> {
     )]
     pub metadata: Account<'info, TokenMetadata>,
 
-    #[account(mut)]
-    pub user_up_only_account: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        constraint = user_up_only_account.mint == up_only_mint.key()
+    )]
+    pub user_up_only_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(
+        mut,
+        constraint = program_up_only_account.mint == up_only_mint.key()
+    )]
+    pub program_up_only_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
-    pub program_up_only_account: Account<'info, TokenAccount>,
-
-    #[account(address = EXPECTED_PAYMENT_TOKEN_MINT)]
     pub payment_token_mint: Account<'info, Mint>,
 
-    #[account(mut)]
-    pub user_payment_token_account: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        constraint = user_payment_token_account.mint == payment_token_mint.key()
+    )]
+    pub user_payment_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(
+        mut,
+        constraint = program_payment_token_account.mint == payment_token_mint.key()
+    )]
+    pub program_payment_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
-    pub program_payment_token_account: Account<'info, TokenAccount>,
+    pub up_usdc_mint: Box<Account<'info, Mint>>,
 
-    #[account(mut, address = EXPECTED_UP_USDC_MINT)]
-    pub up_usdc_mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        constraint = user_up_usdc_account.mint == up_usdc_mint.key()
+    )]
+    pub user_up_usdc_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
-    pub user_up_usdc_account: Account<'info, TokenAccount>,
-
-    #[account(mut)]
-    pub program_up_usdc_account: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        constraint = program_up_usdc_account.mint == up_usdc_mint.key()
+    )]
+    pub program_up_usdc_account: Box<Account<'info, TokenAccount>>,
 
     #[account(
         seeds = [b"mint_authority"],
@@ -1207,7 +1244,7 @@ pub struct Initialize<'info> {
     pub current_mint_authority: Signer<'info>,
     pub current_up_usdc_authority: Signer<'info>,
 
-    #[account(mut, address = PROGRAM_DEPLOYER)]
+    #[account(mut)]
     pub authority: Signer<'info>,
 
     #[account(
@@ -1274,7 +1311,11 @@ pub struct ClaimFounderShare<'info> {
     #[account(mut, seeds = [b"founders_pool"], bump)]
     pub founders_pool: Account<'info, FoundersPool>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = founder_token_account.owner == founder.key(),
+        constraint = founder_token_account.mint == founder_pool_token_account.mint
+    )]
     pub founder_token_account: Account<'info, TokenAccount>,
 
     #[account(mut)]
@@ -1348,7 +1389,11 @@ pub struct BuyAndLockToken<'info> {
     #[account(mut)]
     pub user_up_usdc_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = program_up_usdc_account.mint == metadata.up_usdc_mint,
+        constraint = program_up_usdc_account.key() == anchor_spl::associated_token::get_associated_token_address(&up_pool_authority.key(), &metadata.up_usdc_mint)
+    )]
     pub program_up_usdc_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
@@ -1360,6 +1405,13 @@ pub struct BuyAndLockToken<'info> {
     )]
     /// CHECK: only used as signer
     pub up_usdc_mint_authority: UncheckedAccount<'info>,
+
+    #[account(
+        seeds = [b"token_account", up_usdc_mint.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA that owns program_up_usdc_account
+    pub up_pool_authority: UncheckedAccount<'info>,
 
     pub associated_token_program: Program<'info, AssociatedToken>,
 }
@@ -1425,16 +1477,34 @@ pub struct LeverageBuy<'info> {
     #[account(mut, seeds = [b"founders_pool"], bump)]
     pub founders_pool: Account<'info, FoundersPool>,
 
+    #[account(
+        seeds = [b"founder_authority"],
+        bump
+    )]
+    /// CHECK: PDA used as authority/owner of founder pool ATA
+    pub founder_authority: UncheckedAccount<'info>,
+
     #[account(mut)]
     pub founder_pool_token_account: Box<Account<'info, TokenAccount>>,
+
+    /// CHECK: PDA that owns program_payment_token_account
+    /// Seeds will be validated in function body after metadata is loaded
+    pub pool_authority: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub user_up_usdc_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = program_up_usdc_account.mint == metadata.up_usdc_mint,
+        constraint = program_up_usdc_account.key() == anchor_spl::associated_token::get_associated_token_address(&up_pool_authority.key(), &metadata.up_usdc_mint)
+    )]
     pub program_up_usdc_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = up_usdc_mint.key() == metadata.up_usdc_mint
+    )]
     pub up_usdc_mint: Account<'info, Mint>,
 
     #[account(
@@ -1443,17 +1513,23 @@ pub struct LeverageBuy<'info> {
     )]
     /// CHECK: only used as signer
     pub up_usdc_mint_authority: UncheckedAccount<'info>,
+
+    #[account(
+        seeds = [b"token_account", up_usdc_mint.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA that owns program_up_usdc_account
+    pub up_pool_authority: UncheckedAccount<'info>,
+
+    pub associated_token_program: Program<'info, AssociatedToken>,
 }
 
 #[derive(Accounts)]
 pub struct LeverageSell<'info> {
     pub cranker: Signer<'info>,
 
-    #[account(
-        seeds = [b"token_account", metadata.payment_token.as_ref()],
-        bump
-    )]
     /// CHECK: signer for transferring from program_payment_token_account
+    /// Seeds will be validated in function body after metadata is loaded
     pub pool_authority: UncheckedAccount<'info>,
 
     #[account(
@@ -1487,7 +1563,11 @@ pub struct LeverageSell<'info> {
     #[account(mut)]
     pub user_usdc_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = deployer_usdc_account.mint == metadata.payment_token,
+        constraint = deployer_usdc_account.key() == anchor_spl::associated_token::get_associated_token_address(&metadata.team, &metadata.payment_token)
+    )]
     pub deployer_usdc_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
@@ -1496,21 +1576,39 @@ pub struct LeverageSell<'info> {
     #[account(mut)]
     pub token_mint: Account<'info, Mint>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = founder_pool_token_account.mint == metadata.payment_token,
+        constraint = founder_pool_token_account.key() == anchor_spl::associated_token::get_associated_token_address(&founder_authority.key(), &metadata.payment_token)
+    )]
     pub founder_pool_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
     pub founders_pool: Account<'info, FoundersPool>,
+
+    #[account(
+        seeds = [b"founder_authority"],
+        bump
+    )]
+    /// CHECK: PDA used as authority/owner of founder pool ATA
+    pub founder_authority: UncheckedAccount<'info>,
 
     pub token_program: Program<'info, Token>,
 
     #[account(mut)]
     pub user_up_usdc_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = program_up_usdc_account.mint == metadata.up_usdc_mint,
+        constraint = program_up_usdc_account.key() == anchor_spl::associated_token::get_associated_token_address(&up_pool_authority.key(), &metadata.up_usdc_mint)
+    )]
     pub program_up_usdc_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = up_usdc_mint.key() == metadata.up_usdc_mint
+    )]
     pub up_usdc_mint: Account<'info, Mint>,
 
     #[account(
@@ -1528,11 +1626,8 @@ pub struct LeverageSell<'info> {
 pub struct ClaimLockedTokens<'info> {
     pub cranker: Signer<'info>,
 
-    #[account(
-        seeds = [b"token_account", metadata.payment_token.as_ref()],
-        bump
-    )]
     /// CHECK: signer for transferring from program_payment_token_account
+    /// Seeds will be validated in function body after metadata is loaded
     pub pool_authority: UncheckedAccount<'info>,
 
     #[account(
@@ -1567,10 +1662,17 @@ pub struct ClaimLockedTokens<'info> {
     )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = user_usdc_account.mint == metadata.payment_token
+    )]
     pub user_usdc_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = deployer_usdc_account.mint == metadata.payment_token,
+        constraint = deployer_usdc_account.key() == anchor_spl::associated_token::get_associated_token_address(&metadata.team, &metadata.payment_token)
+    )]
     pub deployer_usdc_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
@@ -1579,18 +1681,36 @@ pub struct ClaimLockedTokens<'info> {
     #[account(mut)]
     pub token_mint: Account<'info, Mint>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = founder_pool_token_account.mint == metadata.payment_token,
+        constraint = founder_pool_token_account.key() == anchor_spl::associated_token::get_associated_token_address(&founder_authority.key(), &metadata.payment_token)
+    )]
     pub founder_pool_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
     pub founders_pool: Account<'info, FoundersPool>,
 
+    #[account(
+        seeds = [b"founder_authority"],
+        bump
+    )]
+    /// CHECK: PDA used as authority/owner of founder pool ATA
+    pub founder_authority: UncheckedAccount<'info>,
+
     pub token_program: Program<'info, Token>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = program_up_usdc_account.mint == metadata.up_usdc_mint,
+        constraint = program_up_usdc_account.key() == anchor_spl::associated_token::get_associated_token_address(&up_pool_authority.key(), &metadata.up_usdc_mint)
+    )]
     pub program_up_usdc_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = up_usdc_mint.key() == metadata.up_usdc_mint
+    )]
     pub up_usdc_mint: Account<'info, Mint>,
 
     #[account(
@@ -1628,7 +1748,16 @@ pub struct InitializeUserVault<'info> {
     #[account(mut)]
     pub vault_token_account: AccountInfo<'info>,
 
+    #[account(
+        constraint = token_mint.key() == metadata.mint
+    )]
     pub token_mint: Account<'info, Mint>,
+
+    #[account(
+        seeds = [b"metadata", token_mint.key().as_ref()],
+        bump
+    )]
+    pub metadata: Account<'info, TokenMetadata>,
 
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
@@ -1648,7 +1777,16 @@ pub struct InitializeLeverageUserVault<'info> {
     #[account(mut)]
     pub vault_token_account: AccountInfo<'info>,
 
+    #[account(
+        constraint = token_mint.key() == metadata.mint
+    )]
     pub token_mint: Account<'info, Mint>,
+
+    #[account(
+        seeds = [b"metadata", token_mint.key().as_ref()],
+        bump
+    )]
+    pub metadata: Account<'info, TokenMetadata>,
 
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
