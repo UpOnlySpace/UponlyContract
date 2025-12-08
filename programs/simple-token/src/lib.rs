@@ -604,15 +604,12 @@ pub mod up_only {
             token::accessor::amount(&ctx.accounts.program_up_usdc_account.to_account_info())?
                 as f64;
         let token_supply_raw = ctx.accounts.token_mint.supply.max(1) as f64;
-
         let liquidity_balance = liquidity_balance_raw / 1e6;
         let token_supply = token_supply_raw / 1e9;
         let token_amount_dec = token_amount as f64 / 1e9;
-
         let price_per_token = liquidity_balance / token_supply;
         let total_value = token_amount_dec * price_per_token;
         let total_value_scaled = total_value * 1e6;
-
         let founder_fee =
             ((config.founder_bps as f64 / 10_000.0) * total_value_scaled).round() as u64;
         let team_fee = ((config.team_bps as f64 / 10_000.0) * total_value_scaled).round() as u64;
@@ -620,7 +617,6 @@ pub mod up_only {
             ((config.liquidity_bps as f64 / 10_000.0) * total_value_scaled).round() as u64;
         let user_receives =
             total_value_scaled.round() as u64 - founder_fee - team_fee - liquidity_fee;
-
         let vault_bump = ctx.bumps.vault_authority;
         let vault_seeds: &[&[&[u8]]] =
             &[&[b"vault", ctx.accounts.user.key.as_ref(), &[vault_bump]]];
@@ -2416,4 +2412,3 @@ pub enum CustomError {
     #[msg("Invalid program upUSDC account owner")]
     InvalidProgramUpUsdcAccount,
 }
-
