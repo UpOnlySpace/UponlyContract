@@ -224,14 +224,14 @@ pub mod up_only {
     pub fn buy_and_lock_token(
         ctx: Context<BuyAndLockToken>,
         amount: u64,
-        lock_days: u64,
+        lock_hour: u64,
         referral: Option<Pubkey>,
     ) -> Result<()> {
         let clock = Clock::get()?;
         let lock_state = &mut ctx.accounts.lock_state;
         require!(!lock_state.initialized, CustomError::AlreadyInitialized);
         require!(
-            matches!(lock_days, 1 | 2 | 3 | 4 | 6 | 8 | 12),
+            matches!(lock_hour, 1 | 2 | 3 | 4 | 6 | 8 | 12),
             CustomError::InvalidLockPeriod
         );
 
@@ -304,7 +304,7 @@ pub mod up_only {
             CustomError::InvalidProgramUpUsdcAccount
         );
 
-        let config = get_lock_fee_config(lock_days);
+        let config = get_lock_fee_config(lock_hour);
         let total_usdc = amount;
         let team_share = total_usdc * config.team_bps / 10_000;
         let founder_fee = total_usdc * config.founder_bps / 10_000;
@@ -444,10 +444,10 @@ pub mod up_only {
 
         lock_state.user = ctx.accounts.user.key();
         lock_state.amount = mintable_tokens;
-        lock_state.unlock_time = clock.unix_timestamp + (lock_days as i64) * 3600;
+        lock_state.unlock_time = clock.unix_timestamp + (lock_hour as i64) * 3600;
         lock_state.referral = referral;
         lock_state.initialized = true;
-        lock_state.lock_days = lock_days;
+        lock_state.lock_hour = lock_hour;
 
         Ok(())
     }
@@ -476,8 +476,8 @@ pub mod up_only {
         );
 
         let token_amount = lock_state.amount;
-        let lock_days = lock_state.lock_days;
-        let config = get_lock_fee_config(lock_days);
+        let lock_hour = lock_state.lock_hour;
+        let config = get_lock_fee_config(lock_hour);
         let liquidity_balance_raw =
             token::accessor::amount(&ctx.accounts.program_up_usdc_account.to_account_info())?
                 as f64;
@@ -596,8 +596,8 @@ pub mod up_only {
         );
 
         let token_amount = lock_state.amount;
-        let lock_days = lock_state.lock_days;
-        let mut config = get_lock_fee_config(lock_days);
+        let lock_hour = lock_state.lock_hour;
+        let mut config = get_lock_fee_config(lock_hour);
         config.team_bps += 50;
 
         let liquidity_balance_raw =
@@ -777,7 +777,7 @@ pub mod up_only {
         ctx: Context<LeverageBuy>,
         amount: u64,
         leverage_multiplier: u64,
-        lock_days: u64,
+        lock_hour: u64,
         referral: Option<Pubkey>,
     ) -> Result<()> {
         require!(
@@ -792,7 +792,7 @@ pub mod up_only {
         );
 
         require!(
-            matches!(lock_days, 1 | 2 | 3 | 4 | 6 | 8 | 12),
+            matches!(lock_hour, 1 | 2 | 3 | 4 | 6 | 8 | 12),
             CustomError::InvalidLockPeriod
         );
 
@@ -844,7 +844,7 @@ pub mod up_only {
 
         let borrow_amount = total_usdc - amount;
 
-        let config = get_lock_fee_config(lock_days);
+        let config = get_lock_fee_config(lock_hour);
 
         let team_share = total_usdc * config.team_bps / 10_000;
         let founder_fee = total_usdc * config.founder_bps / 10_000;
@@ -982,10 +982,10 @@ pub mod up_only {
         leverage_position.user = ctx.accounts.user.key();
         leverage_position.amount_user_paid = amount;
         leverage_position.amount_borrowed = borrow_amount;
-        leverage_position.unlock_time = clock.unix_timestamp + (lock_days as i64) * 3600;
+        leverage_position.unlock_time = clock.unix_timestamp + (lock_hour as i64) * 3600;
         leverage_position.referral = referral;
         leverage_position.initialized = true;
-        leverage_position.lock_days = lock_days;
+        leverage_position.lock_hour = lock_hour;
         leverage_position.amount_minted = mintable_tokens;
 
         Ok(())
@@ -1018,8 +1018,8 @@ pub mod up_only {
         let total_value_scaled = total_value * 1e6;
         let borrowed = position.amount_borrowed;
 
-        let lock_days = position.lock_days;
-        let config = get_lock_fee_config(lock_days);
+        let lock_hour = position.lock_hour;
+        let config = get_lock_fee_config(lock_hour);
 
         let founder_fee =
             ((config.founder_bps as f64 / 10_000.0) * total_value_scaled).round() as u64;
@@ -1185,8 +1185,8 @@ pub mod up_only {
         );
 
         let amount_minted = leverage_position.amount_minted;
-        let lock_days = leverage_position.lock_days;
-        let mut config = get_lock_fee_config(lock_days);
+        let lock_hour = leverage_position.lock_hour;
+        let mut config = get_lock_fee_config(lock_hour);
         config.team_bps += 50; // Add 0.5% penalty
 
         let borrowed = leverage_position.amount_borrowed;
@@ -1351,8 +1351,8 @@ pub mod up_only {
     }
 }
 
-pub fn get_lock_fee_config(lock_days: u64) -> LockFeeConfig {
-    match lock_days {
+pub fn get_lock_fee_config(lock_hour: u64) -> LockFeeConfig {
+    match lock_hour {
         1 => LockFeeConfig {
             liquidity_bps: 150,
             team_bps: 75,
@@ -1399,7 +1399,7 @@ pub fn get_lock_fee_config(lock_days: u64) -> LockFeeConfig {
 #[derive(Accounts)]
 pub struct Initialize<'info> {
     #[account(mut)]
-    pub up_only_mint: Account<'info, Mint>,
+    pub up_only_mint: Box<Account<'info, Mint>>,
 
     #[account(
         init,
@@ -1423,7 +1423,7 @@ pub struct Initialize<'info> {
     pub program_up_only_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
-    pub payment_token_mint: Account<'info, Mint>,
+    pub payment_token_mint: Box<Account<'info, Mint>>,
 
     #[account(
         mut,
@@ -1496,7 +1496,7 @@ pub struct InitializeFoundersPool<'info> {
         seeds = [b"founders_pool"],
         bump
     )]
-    pub founders_pool: Account<'info, FoundersPool>,
+    pub founders_pool: Box<Account<'info, FoundersPool>>,
 
     /// CHECK: Just a PDA, no need for data validation
     #[account(
@@ -1534,12 +1534,14 @@ pub struct ClaimFounderShare<'info> {
     pub founder: Signer<'info>,
 
     #[account(mut, seeds = [b"founders_pool"], bump)]
-    pub founders_pool: Account<'info, FoundersPool>,
+    pub founders_pool: Box<Account<'info, FoundersPool>>,
 
     #[account(
         mut,
         constraint = founder_token_account.owner == founder.key(),
-        constraint = founder_token_account.mint == founder_pool_token_account.mint
+        constraint = founder_token_account.mint == founder_pool_token_account.mint,
+        associated_token::mint = founder_pool_token_account.mint,
+        associated_token::authority = founder
     )]
     pub founder_token_account: Account<'info, TokenAccount>,
 
@@ -1571,7 +1573,7 @@ pub struct BuyAndLockToken<'info> {
     pub program_payment_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
-    pub token_mint: Account<'info, Mint>,
+    pub token_mint: Box<Account<'info, Mint>>,
 
     #[account(
         seeds = [b"mint_authority"],
@@ -1584,7 +1586,7 @@ pub struct BuyAndLockToken<'info> {
         seeds = [b"metadata", token_mint.key().as_ref()],
         bump
     )]
-    pub metadata: Account<'info, TokenMetadata>,
+    pub metadata: Box<Account<'info, TokenMetadata>>,
 
     #[account(
         mut,
@@ -1592,7 +1594,7 @@ pub struct BuyAndLockToken<'info> {
         associated_token::authority = vault_authority
     )]
     /// CHECK: ATA for vault
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(seeds = [b"vault", user.key().as_ref()], bump)]
     /// CHECK: Vault PDA signer
@@ -1606,7 +1608,7 @@ pub struct BuyAndLockToken<'info> {
     pub rent: Sysvar<'info, Rent>,
 
     #[account(mut, seeds = [b"founders_pool"], bump)]
-    pub founders_pool: Account<'info, FoundersPool>,
+    pub founders_pool: Box<Account<'info, FoundersPool>>,
 
     #[account(
         seeds = [b"founder_authority"],
@@ -1619,7 +1621,6 @@ pub struct BuyAndLockToken<'info> {
     pub founder_pool_token_account: Box<Account<'info, TokenAccount>>,
 
     /// CHECK: PDA that owns program_payment_token_account
-    /// Seeds will be validated in function body after metadata is loaded
     pub pool_authority: UncheckedAccount<'info>,
 
     #[account(mut)]
@@ -1633,7 +1634,7 @@ pub struct BuyAndLockToken<'info> {
     pub program_up_usdc_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
-    pub up_usdc_mint: Account<'info, Mint>,
+    pub up_usdc_mint: Box<Account<'info, Mint>>,
 
     #[account(
         seeds = [b"up_usdc_mint_authority"],
@@ -1668,7 +1669,9 @@ pub struct LeverageBuy<'info> {
 
     #[account(
         mut,
-        constraint = user_usdc_account.mint == metadata.payment_token
+        constraint = user_usdc_account.mint == metadata.payment_token,
+        associated_token::mint = metadata.payment_token,
+        associated_token::authority = user
     )]
     pub user_usdc_account: Box<Account<'info, TokenAccount>>,
 
@@ -1685,7 +1688,7 @@ pub struct LeverageBuy<'info> {
     pub program_payment_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
-    pub token_mint: Account<'info, Mint>,
+    pub token_mint: Box<Account<'info, Mint>>,
 
     #[account(
         seeds = [b"mint_authority"],
@@ -1698,7 +1701,7 @@ pub struct LeverageBuy<'info> {
         seeds = [b"metadata", token_mint.key().as_ref()],
         bump
     )]
-    pub metadata: Account<'info, TokenMetadata>,
+    pub metadata: Box<Account<'info, TokenMetadata>>,
 
     #[account(
         mut,
@@ -1707,7 +1710,7 @@ pub struct LeverageBuy<'info> {
         constraint = vault_token_account.mint == metadata.mint
     )]
     /// CHECK: ATA for vault
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(seeds = [b"l_vault", user.key().as_ref()], bump)]
     /// CHECK: Vault PDA signer
@@ -1724,7 +1727,7 @@ pub struct LeverageBuy<'info> {
     pub rent: Sysvar<'info, Rent>,
 
     #[account(mut, seeds = [b"founders_pool"], bump)]
-    pub founders_pool: Account<'info, FoundersPool>,
+    pub founders_pool: Box<Account<'info, FoundersPool>>,
 
     #[account(
         seeds = [b"founder_authority"],
@@ -1821,7 +1824,9 @@ pub struct LeverageSell<'info> {
 
     #[account(
         mut,
-        constraint = user_usdc_account.mint == metadata.payment_token
+        constraint = user_usdc_account.mint == metadata.payment_token,
+        associated_token::mint = metadata.payment_token,
+        associated_token::authority = user
     )]
     pub user_usdc_account: Box<Account<'info, TokenAccount>>,
 
@@ -1849,7 +1854,7 @@ pub struct LeverageSell<'info> {
     pub founder_pool_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, seeds = [b"founders_pool"], bump)]
-    pub founders_pool: Account<'info, FoundersPool>,
+    pub founders_pool: Box<Account<'info, FoundersPool>>,
 
     #[account(
         seeds = [b"founder_authority"],
@@ -1935,7 +1940,9 @@ pub struct EarlyCloseLeverage<'info> {
 
     #[account(
         mut,
-        constraint = user_usdc_account.mint == metadata.payment_token
+        constraint = user_usdc_account.mint == metadata.payment_token,
+        associated_token::mint = metadata.payment_token,
+        associated_token::authority = user
     )]
     pub user_usdc_account: Box<Account<'info, TokenAccount>>,
 
@@ -1963,7 +1970,7 @@ pub struct EarlyCloseLeverage<'info> {
     pub founder_pool_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, seeds = [b"founders_pool"], bump)]
-    pub founders_pool: Account<'info, FoundersPool>,
+    pub founders_pool: Box<Account<'info, FoundersPool>>,
 
     #[account(
         seeds = [b"founder_authority"],
@@ -2077,7 +2084,7 @@ pub struct ClaimLockedTokens<'info> {
     pub founder_pool_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, seeds = [b"founders_pool"], bump)]
-    pub founders_pool: Account<'info, FoundersPool>,
+    pub founders_pool: Box<Account<'info, FoundersPool>>,
 
     #[account(
         seeds = [b"founder_authority"],
@@ -2139,7 +2146,9 @@ pub struct EarlyUnlockTokens<'info> {
 
     #[account(
         mut,
-        constraint = user_usdc_account.mint == metadata.payment_token
+        constraint = user_usdc_account.mint == metadata.payment_token,
+        associated_token::mint = metadata.payment_token,
+        associated_token::authority = user
     )]
     pub user_usdc_account: Account<'info, TokenAccount>,
 
@@ -2177,7 +2186,7 @@ pub struct EarlyUnlockTokens<'info> {
     pub founder_pool_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, seeds = [b"founders_pool"], bump)]
-    pub founders_pool: Account<'info, FoundersPool>,
+    pub founders_pool: Box<Account<'info, FoundersPool>>,
 
     #[account(
         seeds = [b"founder_authority"],
@@ -2215,7 +2224,7 @@ pub struct AddFounder<'info> {
     pub metadata: Account<'info, TokenMetadata>,
 
     #[account(mut, seeds = [b"founders_pool"], bump)]
-    pub founders_pool: Account<'info, FoundersPool>,
+    pub founders_pool: Box<Account<'info, FoundersPool>>,
 
     pub deployer: Signer<'info>,
 }
@@ -2315,7 +2324,7 @@ pub struct LockedTokenState {
     pub unlock_time: i64,
     pub referral: Option<Pubkey>,
     pub initialized: bool,
-    pub lock_days: u64,
+    pub lock_hour: u64,
 }
 
 #[account]
@@ -2326,7 +2335,7 @@ pub struct LeveragePosition {
     pub unlock_time: i64,
     pub referral: Option<Pubkey>,
     pub initialized: bool,
-    pub lock_days: u64,
+    pub lock_hour: u64,
     pub amount_minted: u64,
 }
 #[account]
