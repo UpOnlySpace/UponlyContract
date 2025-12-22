@@ -1563,13 +1563,34 @@ pub struct BuyAndLockToken<'info> {
     #[account(init_if_needed, payer = user, space = 8 + 32 + 8 + 8 + 33 + 1 + 8, seeds = [b"locked", user.key().as_ref()], bump)]
     pub lock_state: Account<'info, LockedTokenState>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = user_usdc_account.mint == metadata.payment_token,
+        associated_token::mint = metadata.payment_token,
+        associated_token::authority = user
+    )]
     pub user_usdc_account: Box<Account<'info, TokenAccount>>,
-
-    #[account(mut)]
+    
+    #[account(
+        mut,
+        constraint = deployer_usdc_account.mint == metadata.payment_token,
+        constraint = deployer_usdc_account.key()
+            == anchor_spl::associated_token::get_associated_token_address(
+                &metadata.team,
+                &metadata.payment_token
+            )
+    )]
     pub deployer_usdc_account: Box<Account<'info, TokenAccount>>,
-
-    #[account(mut)]
+    
+    #[account(
+        mut,
+        constraint = program_payment_token_account.mint == metadata.payment_token,
+        constraint = program_payment_token_account.key()
+            == anchor_spl::associated_token::get_associated_token_address(
+                &pool_authority.key(),
+                &metadata.payment_token
+            )
+    )]
     pub program_payment_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
@@ -1620,6 +1641,10 @@ pub struct BuyAndLockToken<'info> {
     #[account(mut)]
     pub founder_pool_token_account: Box<Account<'info, TokenAccount>>,
 
+    #[account(
+        seeds = [b"token_account", metadata.payment_token.as_ref()],
+        bump
+    )]
     /// CHECK: PDA that owns program_payment_token_account
     pub pool_authority: UncheckedAccount<'info>,
 
@@ -1683,7 +1708,12 @@ pub struct LeverageBuy<'info> {
 
     #[account(
         mut,
-        constraint = program_payment_token_account.mint == metadata.payment_token
+        constraint = program_payment_token_account.mint == metadata.payment_token,
+        constraint = program_payment_token_account.key()
+            == anchor_spl::associated_token::get_associated_token_address(
+                &pool_authority.key(),
+                &metadata.payment_token
+            )
     )]
     pub program_payment_token_account: Box<Account<'info, TokenAccount>>,
 
@@ -1800,8 +1830,8 @@ pub struct LeverageSell<'info> {
     pub metadata: Account<'info, TokenMetadata>,
 
     #[account(mut)]
-    ///CHECK: Used to derive vault PDA
-    pub user: UncheckedAccount<'info>,
+    ///CHECK: Used to derive vault PDA; must authorize closing the position
+    pub user: Signer<'info>,
 
     #[account(mut, seeds = [b"leverage", user.key().as_ref()], bump)]
     pub leverage_position: Account<'info, LeveragePosition>,
@@ -1839,7 +1869,12 @@ pub struct LeverageSell<'info> {
 
     #[account(
         mut,
-        constraint = program_payment_token_account.mint == metadata.payment_token
+        constraint = program_payment_token_account.mint == metadata.payment_token,
+        constraint = program_payment_token_account.key()
+            == anchor_spl::associated_token::get_associated_token_address(
+                &pool_authority.key(),
+                &metadata.payment_token
+            )
     )]
     pub program_payment_token_account: Box<Account<'info, TokenAccount>>,
 
@@ -1955,7 +1990,12 @@ pub struct EarlyCloseLeverage<'info> {
 
     #[account(
         mut,
-        constraint = program_payment_token_account.mint == metadata.payment_token
+        constraint = program_payment_token_account.mint == metadata.payment_token,
+        constraint = program_payment_token_account.key()
+            == anchor_spl::associated_token::get_associated_token_address(
+                &pool_authority.key(),
+                &metadata.payment_token
+            )
     )]
     pub program_payment_token_account: Box<Account<'info, TokenAccount>>,
 
@@ -2026,8 +2066,8 @@ pub struct ClaimLockedTokens<'info> {
     pub metadata: Account<'info, TokenMetadata>,
 
     #[account(mut)]
-    ///CHECK: Used to derive vault PDA
-    pub user: UncheckedAccount<'info>,
+    ///CHECK: Used to derive vault PDA; must authorize claim/sell
+    pub user: Signer<'info>,
 
     #[account(
         mut,
@@ -2161,7 +2201,12 @@ pub struct EarlyUnlockTokens<'info> {
 
     #[account(
         mut,
-        constraint = program_payment_token_account.mint == metadata.payment_token
+        constraint = program_payment_token_account.mint == metadata.payment_token,
+        constraint = program_payment_token_account.key()
+            == anchor_spl::associated_token::get_associated_token_address(
+                &pool_authority.key(),
+                &metadata.payment_token
+            )
     )]
     pub program_payment_token_account: Account<'info, TokenAccount>,
 
