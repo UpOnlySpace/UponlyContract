@@ -1951,8 +1951,8 @@ pub struct EarlyCloseLeverage<'info> {
     pub metadata: Account<'info, TokenMetadata>,
 
     #[account(mut)]
-    ///CHECK: Used to derive vault PDA
-    pub user: UncheckedAccount<'info>,
+    ///CHECK: Used to derive vault PDA; must authorize closing the position
+    pub user: Signer<'info>,
 
     #[account(mut, seeds = [b"leverage", user.key().as_ref()], bump)]
     pub leverage_position: Account<'info, LeveragePosition>,
