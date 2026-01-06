@@ -189,38 +189,6 @@ pub mod up_only {
         Ok(())
     }
 
-    pub fn initialize_user_vault(ctx: Context<InitializeUserVault>) -> Result<()> {
-        let cpi_ctx = CpiContext::new(
-            ctx.accounts.associated_token_program.to_account_info(),
-            anchor_spl::associated_token::Create {
-                payer: ctx.accounts.user.to_account_info(),
-                associated_token: ctx.accounts.vault_token_account.to_account_info(),
-                authority: ctx.accounts.vault_authority.to_account_info(),
-                mint: ctx.accounts.token_mint.to_account_info(),
-                system_program: ctx.accounts.system_program.to_account_info(),
-                token_program: ctx.accounts.token_program.to_account_info(),
-            },
-        );
-        anchor_spl::associated_token::create(cpi_ctx)?;
-        Ok(())
-    }
-
-    pub fn initialize_leverage_user_vault(ctx: Context<InitializeLeverageUserVault>) -> Result<()> {
-        let cpi_ctx = CpiContext::new(
-            ctx.accounts.associated_token_program.to_account_info(),
-            anchor_spl::associated_token::Create {
-                payer: ctx.accounts.user.to_account_info(),
-                associated_token: ctx.accounts.vault_token_account.to_account_info(),
-                authority: ctx.accounts.vault_authority.to_account_info(),
-                mint: ctx.accounts.token_mint.to_account_info(),
-                system_program: ctx.accounts.system_program.to_account_info(),
-                token_program: ctx.accounts.token_program.to_account_info(),
-            },
-        );
-        anchor_spl::associated_token::create(cpi_ctx)?;
-        Ok(())
-    }
-
     pub fn buy_and_lock_token(
         ctx: Context<BuyAndLockToken>,
         amount: u64,
@@ -1734,9 +1702,13 @@ pub struct InitializeUserVault<'info> {
     #[account(seeds = [b"vault", user.key().as_ref()], bump)]
     pub vault_authority: UncheckedAccount<'info>,
 
-    /// CHECK: ATA will be created in this instruction
-    #[account(mut)]
-    pub vault_token_account: AccountInfo<'info>,
+    #[account(
+        init_if_needed,
+        payer = user,
+        associated_token::mint = token_mint,
+        associated_token::authority = vault_authority
+    )]
+    pub vault_token_account: Account<'info, TokenAccount>,
 
     #[account(
         constraint = token_mint.key() == metadata.mint
@@ -1763,9 +1735,13 @@ pub struct InitializeLeverageUserVault<'info> {
     #[account(seeds = [b"l_vault", user.key().as_ref()], bump)]
     pub vault_authority: UncheckedAccount<'info>,
 
-    /// CHECK: ATA will be created in this instruction
-    #[account(mut)]
-    pub vault_token_account: AccountInfo<'info>,
+    #[account(
+        init_if_needed,
+        payer = user,
+        associated_token::mint = token_mint,
+        associated_token::authority = vault_authority
+    )]
+    pub vault_token_account: Account<'info, TokenAccount>,
 
     #[account(
         constraint = token_mint.key() == metadata.mint
