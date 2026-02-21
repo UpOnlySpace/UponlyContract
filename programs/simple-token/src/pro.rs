@@ -3,7 +3,7 @@ use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
 
-declare_id!("2XRYELdk3k9XFs7JkSw55sz5aZWqNeZhY71rZr2pYETu");
+declare_id!("Apnkq5kbvXJCNxukE4VX1Gmyo8JD3U4QteQ2km6nbj1P");
 
 
 #[program]
@@ -168,8 +168,8 @@ pub mod up_only {
         let pool = &mut ctx.accounts.founders_pool;
         pool.total_collected = 0;
         pool.founder_count = 0;
-        pool.founders = vec![Pubkey::default(); 60];
-        pool.claim_status = vec![0u64; 60];
+        pool.founders = vec![Pubkey::default(); 110];
+        pool.claim_status = vec![0u64; 110];
 
         if ctx.accounts.founder_pool_token_account.lamports() == 0 {
             let cpi_ctx = CpiContext::new(
@@ -582,7 +582,7 @@ pub mod up_only {
         );
 
         let pool = &mut ctx.accounts.founders_pool;
-        require!(pool.founder_count < 60, CustomError::FounderLimitReached);
+        require!(pool.founder_count < 110, CustomError::FounderLimitReached);
 
         if pool.founders[..pool.founder_count as usize].contains(&new_founder) {
             return Err(CustomError::DuplicateFounder.into());
@@ -609,7 +609,7 @@ pub mod up_only {
         }
 
         let idx = index.ok_or(CustomError::NotFounder)?;
-        let total_per_founder = pool.total_collected / 60;
+        let total_per_founder = pool.total_collected / 110;
         let already_claimed = pool.claim_status[idx];
         let claimable = total_per_founder.saturating_sub(already_claimed);
 
@@ -1031,8 +1031,8 @@ pub mod up_only {
 pub fn get_lock_fee_config() -> LockFeeConfig {
     LockFeeConfig {
         liquidity_bps: 725,
-        team_bps: 250,
-        founder_bps: 25,
+        team_bps: 225,
+        founder_bps: 50,
     }
 }
 
@@ -1132,7 +1132,7 @@ pub struct InitializeFoundersPool<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 8 + 1924 + 484 + 1,
+        space = 8 + 8 + 3524 + 884 + 1,
         seeds = [b"founders_pool"],
         bump
     )]
@@ -1691,39 +1691,6 @@ pub struct AddFounder<'info> {
     pub founders_pool: Box<Account<'info, FoundersPool>>,
 
     pub deployer: Signer<'info>,
-}
-
-#[derive(Accounts)]
-pub struct InitializeUserVault<'info> {
-    #[account(mut)]
-    pub user: Signer<'info>,
-
-    /// CHECK: Only used as a derived signer authority
-    #[account(seeds = [b"vault", user.key().as_ref()], bump)]
-    pub vault_authority: UncheckedAccount<'info>,
-
-    #[account(
-        init_if_needed,
-        payer = user,
-        associated_token::mint = token_mint,
-        associated_token::authority = vault_authority
-    )]
-    pub vault_token_account: Account<'info, TokenAccount>,
-
-    #[account(
-        constraint = token_mint.key() == metadata.mint
-    )]
-    pub token_mint: Account<'info, Mint>,
-
-    #[account(
-        seeds = [b"metadata", token_mint.key().as_ref()],
-        bump
-    )]
-    pub metadata: Account<'info, TokenMetadata>,
-
-    pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
 }
 
 #[derive(Accounts)]
